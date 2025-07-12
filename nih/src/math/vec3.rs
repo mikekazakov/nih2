@@ -1,5 +1,7 @@
+use super::vec4::Vec4;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Vec3 {
+pub struct Vec3 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
@@ -22,15 +24,23 @@ impl Vec3 {
             z: self.z.clamp(min, max),
         }
     }
+
+    pub fn as_vector4(self) -> Vec4 {
+        Vec4 {x: self.x, y: self.y, z: self.z, w: 0.}
+    }
+
+    pub fn as_point4(self) -> Vec4 {
+        Vec4 {x: self.x, y: self.y, z: self.z, w: 1.}
+    }
 }
 
 // a * b
-fn dot(a: Vec3, b: Vec3) -> f32 {
+pub fn dot(a: Vec3, b: Vec3) -> f32 {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
 
 // a x b
-fn cross(a: Vec3, b: Vec3) -> Vec3 {
+pub fn cross(a: Vec3, b: Vec3) -> Vec3 {
     Vec3 {
         x: a.y * b.z - a.z * b.y,
         y: a.z * b.x - a.x * b.z,
@@ -39,7 +49,7 @@ fn cross(a: Vec3, b: Vec3) -> Vec3 {
 }
 
 // lerp(a, b, t)
-fn lerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
+pub fn lerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
     Vec3 {
         x: a.x + (b.x - a.x) * t,
         y: a.y + (b.y - a.y) * t,
@@ -536,5 +546,93 @@ mod tests {
 
         // Note: The Rust standard library's clamp function requires min <= max
         // and will panic if min > max, so we don't test that case.
+    }
+
+    #[test]
+    fn test_as_vector4() {
+        // Test normal vector
+        let v1 = Vec3 {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let v4 = v1.as_vector4();
+
+        // Check that x, y, z components match
+        assert_eq!(v4.x, v1.x);
+        assert_eq!(v4.y, v1.y);
+        assert_eq!(v4.z, v1.z);
+        // Check that w component is 0.0 (vector representation)
+        assert_eq!(v4.w, 0.0);
+
+        // Test zero vector
+        let zero_vec = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let zero_vec4 = zero_vec.as_vector4();
+
+        assert_eq!(zero_vec4.x, 0.0);
+        assert_eq!(zero_vec4.y, 0.0);
+        assert_eq!(zero_vec4.z, 0.0);
+        assert_eq!(zero_vec4.w, 0.0);
+
+        // Test negative values
+        let neg_vec = Vec3 {
+            x: -1.0,
+            y: -2.0,
+            z: -3.0,
+        };
+        let neg_vec4 = neg_vec.as_vector4();
+
+        assert_eq!(neg_vec4.x, -1.0);
+        assert_eq!(neg_vec4.y, -2.0);
+        assert_eq!(neg_vec4.z, -3.0);
+        assert_eq!(neg_vec4.w, 0.0);
+    }
+
+    #[test]
+    fn test_as_point4() {
+        // Test normal vector
+        let v1 = Vec3 {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let v4 = v1.as_point4();
+
+        // Check that x, y, z components match
+        assert_eq!(v4.x, v1.x);
+        assert_eq!(v4.y, v1.y);
+        assert_eq!(v4.z, v1.z);
+        // Check that w component is 1.0 (point representation)
+        assert_eq!(v4.w, 1.0);
+
+        // Test zero vector
+        let zero_vec = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let zero_vec4 = zero_vec.as_point4();
+
+        assert_eq!(zero_vec4.x, 0.0);
+        assert_eq!(zero_vec4.y, 0.0);
+        assert_eq!(zero_vec4.z, 0.0);
+        assert_eq!(zero_vec4.w, 1.0);
+
+        // Test negative values
+        let neg_vec = Vec3 {
+            x: -1.0,
+            y: -2.0,
+            z: -3.0,
+        };
+        let neg_vec4 = neg_vec.as_point4();
+
+        assert_eq!(neg_vec4.x, -1.0);
+        assert_eq!(neg_vec4.y, -2.0);
+        assert_eq!(neg_vec4.z, -3.0);
+        assert_eq!(neg_vec4.w, 1.0);
     }
 }
