@@ -323,4 +323,146 @@ mod tests {
             assert_eq!(distance2(v0, v1, p), 25.0);
         }
     }
+
+    #[test]
+    fn test_distance_and_distance2_comprehensive() {
+        // Test cases converted from the provided C++ test cases
+        #[derive(Debug)]
+        struct TestCase {
+            v0: Vec2,
+            v1: Vec2,
+            p: Vec2,
+            expected_distance: f32,
+            expected_distance2: f32,
+        }
+
+        let test_cases = [
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 0.0 }, 
+                v1: Vec2 { x: 3.0, y: 0.0 }, 
+                p: Vec2 { x: 0.0, y: 0.0 }, 
+                expected_distance: 0.0, 
+                expected_distance2: 0.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 0.0 }, 
+                v1: Vec2 { x: 3.0, y: 0.0 }, 
+                p: Vec2 { x: 0.0, y: 5.0 }, 
+                expected_distance: 5.0, 
+                expected_distance2: 25.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 0.0 }, 
+                v1: Vec2 { x: 3.0, y: 0.0 }, 
+                p: Vec2 { x: 0.0, y: -5.0 }, 
+                expected_distance: 5.0, 
+                expected_distance2: 25.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 0.0 }, 
+                v1: Vec2 { x: 3.0, y: 0.0 }, 
+                p: Vec2 { x: 5.0, y: 5.0 }, 
+                expected_distance: 5.0, 
+                expected_distance2: 25.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 0.0 }, 
+                v1: Vec2 { x: 3.0, y: 0.0 }, 
+                p: Vec2 { x: 5.0, y: -5.0 }, 
+                expected_distance: 5.0, 
+                expected_distance2: 25.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 0.0 }, 
+                v1: Vec2 { x: 3.0, y: 0.0 }, 
+                p: Vec2 { x: -5.0, y: 5.0 }, 
+                expected_distance: 5.0, 
+                expected_distance2: 25.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 0.0 }, 
+                v1: Vec2 { x: 3.0, y: 0.0 }, 
+                p: Vec2 { x: -5.0, y: -5.0 }, 
+                expected_distance: 5.0, 
+                expected_distance2: 25.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 2.0 }, 
+                v1: Vec2 { x: 3.0, y: 2.0 }, 
+                p: Vec2 { x: 0.0, y: 0.0 }, 
+                expected_distance: 2.0, 
+                expected_distance2: 4.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 2.0 }, 
+                v1: Vec2 { x: 3.0, y: 2.0 }, 
+                p: Vec2 { x: 0.0, y: 5.0 }, 
+                expected_distance: 3.0, 
+                expected_distance2: 9.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 4.0, y: 1.0 }, 
+                v1: Vec2 { x: 4.0, y: 5.0 }, 
+                p: Vec2 { x: 4.0, y: 1.0 }, 
+                expected_distance: 0.0, 
+                expected_distance2: 0.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 4.0, y: 1.0 }, 
+                v1: Vec2 { x: 4.0, y: 5.0 }, 
+                p: Vec2 { x: 4.0, y: 5.0 }, 
+                expected_distance: 0.0, 
+                expected_distance2: 0.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 4.0, y: 1.0 }, 
+                v1: Vec2 { x: 4.0, y: 5.0 }, 
+                p: Vec2 { x: 2.0, y: 5.0 }, 
+                expected_distance: 2.0, 
+                expected_distance2: 4.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 4.0, y: 1.0 }, 
+                v1: Vec2 { x: 4.0, y: 5.0 }, 
+                p: Vec2 { x: 6.0, y: 5.0 }, 
+                expected_distance: 2.0, 
+                expected_distance2: 4.0 
+            },
+            TestCase { 
+                v0: Vec2 { x: 2.0, y: 3.0 }, 
+                v1: Vec2 { x: 3.0, y: 4.0 }, 
+                p: Vec2 { x: 3.0, y: 3.0 }, 
+                expected_distance: 0.70710678, 
+                expected_distance2: 0.5 
+            },
+            TestCase { 
+                v0: Vec2 { x: 2.0, y: 3.0 }, 
+                v1: Vec2 { x: 3.0, y: 4.0 }, 
+                p: Vec2 { x: 2.0, y: 4.0 }, 
+                expected_distance: 0.70710678, 
+                expected_distance2: 0.5 
+            },
+            TestCase { 
+                v0: Vec2 { x: 0.0, y: 0.0 }, 
+                v1: Vec2 { x: 0.0, y: 0.0 }, 
+                p: Vec2 { x: 1.0, y: 0.0 }, 
+                expected_distance: 1.0, 
+                expected_distance2: 1.0 
+            },
+        ];
+
+        for tc in test_cases.iter() {
+            let actual_distance = distance(tc.v0, tc.v1, tc.p);
+            let actual_distance2 = distance2(tc.v0, tc.v1, tc.p);
+
+            // For floating point comparisons, we use a small epsilon
+            assert!((actual_distance - tc.expected_distance).abs() < 1e-6, 
+                    "distance({:?}, {:?}, {:?}) = {}, expected {}", 
+                    tc.v0, tc.v1, tc.p, actual_distance, tc.expected_distance);
+
+            assert!((actual_distance2 - tc.expected_distance2).abs() < 1e-6, 
+                    "distance2({:?}, {:?}, {:?}) = {}, expected {}", 
+                    tc.v0, tc.v1, tc.p, actual_distance2, tc.expected_distance2);
+        }
+    }
 }
