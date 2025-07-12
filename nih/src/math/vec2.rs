@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Vec2 {
     pub x: f32,
-    pub y: f32
+    pub y: f32,
 }
 
 impl Vec2 {
@@ -9,7 +9,7 @@ impl Vec2 {
         dot(self, self).sqrt()
     }
 
-    fn normalized(self) -> Vec2 {
+    pub fn normalized(self) -> Vec2 {
         let len = self.length();
         self / len
     }
@@ -51,53 +51,69 @@ fn distance2(v0: Vec2, v1: Vec2, p: Vec2) -> f32 {
     dot(d, d)
 }
 
-use std::ops::{Add, Sub, Mul, Div, Neg};
-
 // -Vec2
-impl Neg for Vec2 {
+impl std::ops::Neg for Vec2 {
     type Output = Vec2;
     fn neg(self) -> Vec2 {
-        Vec2 { x: -self.x, y: -self.y }
+        Vec2 {
+            x: -self.x,
+            y: -self.y,
+        }
     }
 }
 
 // Vec2 + Vec2
-impl Add for Vec2 {
+impl std::ops::Add for Vec2 {
     type Output = Vec2;
     fn add(self, other: Vec2) -> Vec2 {
-        Vec2 { x: self.x + other.x, y: self.y + other.y }
+        Vec2 {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
     }
 }
 
 // Vec2 - Vec2
-impl Sub for Vec2 {
+impl std::ops::Sub for Vec2 {
     type Output = Vec2;
     fn sub(self, other: Vec2) -> Vec2 {
-        Vec2 { x: self.x - other.x, y: self.y - other.y }
+        Vec2 {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
     }
 }
 
 // Vec2 * f32
-impl Mul<f32> for Vec2 {
+impl std::ops::Mul<f32> for Vec2 {
     type Output = Vec2;
     fn mul(self, scalar: f32) -> Vec2 {
-        Vec2 { x: self.x * scalar, y: self.y * scalar }
+        Vec2 {
+            x: self.x * scalar,
+            y: self.y * scalar,
+        }
     }
 }
 
 // f32 * Vec2
-impl Mul<Vec2> for f32 {
+impl std::ops::Mul<Vec2> for f32 {
     type Output = Vec2;
     fn mul(self, vec: Vec2) -> Vec2 {
-        Vec2 { x: vec.x * self, y: vec.y * self }
+        Vec2 {
+            x: vec.x * self,
+            y: vec.y * self,
+        }
     }
 }
 
 // Vec2 / f32
-impl Div<f32> for Vec2 {
+impl std::ops::Div<f32> for Vec2 {
     type Output = Vec2;
     fn div(self, scalar: f32) -> Vec2 {
-        Vec2 { x: self.x / scalar, y: self.y / scalar }
+        Vec2 {
+            x: self.x / scalar,
+            y: self.y / scalar,
+        }
     }
 }
 
@@ -203,10 +219,11 @@ mod tests {
     fn test_division() {
         {
             let v = Vec2 { x: 3.0, y: 4.0 };
-            assert_eq!( v / 2.0, Vec2{x: 1.5, y: 2.0} );
-            assert_eq!( v / 0.5, Vec2{x: 6.0, y: 8.0} );
+            assert_eq!(v / 2.0, Vec2 { x: 1.5, y: 2.0 });
+            assert_eq!(v / 0.5, Vec2 { x: 6.0, y: 8.0 });
         }
-        { // division by zero
+        {
+            // division by zero
             let v = Vec2 { x: 1.0, y: 2.0 };
             let result = v / 0.0;
 
