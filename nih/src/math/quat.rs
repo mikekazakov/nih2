@@ -1,8 +1,7 @@
 use super::vec3::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Quat
-{
+pub struct Quat {
     x: f32,
     y: f32,
     z: f32,
@@ -11,7 +10,12 @@ pub struct Quat
 
 impl Quat {
     pub fn identity() -> Quat {
-        Self { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 1.0,
+        }
     }
 
     pub fn from_axis_angle(axis: Vec3, angle: f32) -> Quat {
@@ -27,21 +31,30 @@ impl Quat {
         }
     }
 
-    pub fn inverse(self) -> Quat
-    {
-        Quat{x: -self.x, y: -self.y, z: -self.z, w: self.w}
+    pub fn inverse(self) -> Quat {
+        Quat {
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
+            w: self.w,
+        }
     }
-
 
     pub fn from_look_rotation(forward: Vec3, up: Vec3) -> Quat {
         let f = forward.normalized();
         let r = cross(up, f).normalized(); // right = up × forward
-        let u = cross(f, r);               // real up = forward × right
+        let u = cross(f, r); // real up = forward × right
 
         // Rotation matrix columns: r, u, f
-        let m00 = r.x; let m01 = u.x; let m02 = f.x;
-        let m10 = r.y; let m11 = u.y; let m12 = f.y;
-        let m20 = r.z; let m21 = u.z; let m22 = f.z;
+        let m00 = r.x;
+        let m01 = u.x;
+        let m02 = f.x;
+        let m10 = r.y;
+        let m11 = u.y;
+        let m12 = f.y;
+        let m20 = r.z;
+        let m21 = u.z;
+        let m22 = f.z;
 
         let trace = m00 + m11 + m22;
 
@@ -83,7 +96,12 @@ impl Quat {
     pub fn normalized(self) -> Quat {
         let len = (self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w).sqrt();
         if len == 0.0 {
-            Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 } // Identity fallback
+            Quat {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            } // Identity fallback
         } else {
             let inv_len = 1.0 / len;
             Quat {
@@ -94,7 +112,6 @@ impl Quat {
             }
         }
     }
-
 }
 
 impl std::ops::Mul for Quat {
@@ -122,7 +139,11 @@ impl std::ops::Mul<Vec3> for Quat {
         let ry = v.y + self.w * ty + (self.z * tx - self.x * tz);
         let rz = v.z + self.w * tz + (self.x * ty - self.y * tx);
 
-        Vec3 { x: rx, y: ry, z: rz }
+        Vec3 {
+            x: rx,
+            y: ry,
+            z: rz,
+        }
     }
 }
 
@@ -143,10 +164,10 @@ mod tests {
     impl PartialEq<QuatApprox> for Quat {
         fn eq(&self, other: &QuatApprox) -> bool {
             const EPSILON: f32 = 1e-4;
-            (self.x - other.0.x).abs() < EPSILON &&
-            (self.y - other.0.y).abs() < EPSILON &&
-            (self.z - other.0.z).abs() < EPSILON &&
-            (self.w - other.0.w).abs() < EPSILON
+            (self.x - other.0.x).abs() < EPSILON
+                && (self.y - other.0.y).abs() < EPSILON
+                && (self.z - other.0.z).abs() < EPSILON
+                && (self.w - other.0.w).abs() < EPSILON
         }
     }
 
@@ -157,17 +178,32 @@ mod tests {
     impl PartialEq<Vec3Approx> for Vec3 {
         fn eq(&self, other: &Vec3Approx) -> bool {
             const EPSILON: f32 = 1e-4;
-            (self.x - other.0.x).abs() < EPSILON &&
-            (self.y - other.0.y).abs() < EPSILON &&
-            (self.z - other.0.z).abs() < EPSILON
+            (self.x - other.0.x).abs() < EPSILON
+                && (self.y - other.0.y).abs() < EPSILON
+                && (self.z - other.0.z).abs() < EPSILON
         }
     }
 
     #[test]
     fn test_quat_creation_and_equality() {
-        let q1 = Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 };
-        let q2 = Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 };
-        let q3 = Quat { x: 1.0, y: 0.0, z: 0.0, w: 0.0 };
+        let q1 = Quat {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 1.0,
+        };
+        let q2 = Quat {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 1.0,
+        };
+        let q3 = Quat {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        };
 
         assert_eq!(q1, q2);
         assert_ne!(q1, q3);
@@ -188,7 +224,12 @@ mod tests {
         assert_eq!(identity.w, 1.0);
 
         // Multiplying any quaternion by identity should return the original quaternion
-        let q = Quat { x: 0.5, y: 0.5, z: 0.5, w: 0.5 };
+        let q = Quat {
+            x: 0.5,
+            y: 0.5,
+            z: 0.5,
+            w: 0.5,
+        };
         let result = identity * q;
         assert_eq!(result, q);
 
@@ -199,7 +240,11 @@ mod tests {
     #[test]
     fn test_from_axis_angle() {
         // Test rotation around x-axis by 90 degrees
-        let axis_x = Vec3 { x: 1.0, y: 0.0, z: 0.0 };
+        let axis_x = Vec3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
         let angle_90 = PI / 2.0;
         let q_x_90 = Quat::from_axis_angle(axis_x, angle_90);
 
@@ -212,7 +257,11 @@ mod tests {
         assert!((q_x_90.w - expected_cos).abs() < 1e-6);
 
         // Test rotation around y-axis by 180 degrees
-        let axis_y = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
+        let axis_y = Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
         let angle_180 = PI;
         let q_y_180 = Quat::from_axis_angle(axis_y, angle_180);
 
@@ -223,7 +272,11 @@ mod tests {
         assert!((q_y_180.w - 0.0).abs() < 1e-6);
 
         // Test with non-unit axis
-        let non_unit_axis = Vec3 { x: 2.0, y: 0.0, z: 0.0 };
+        let non_unit_axis = Vec3 {
+            x: 2.0,
+            y: 0.0,
+            z: 0.0,
+        };
         let q_non_unit = Quat::from_axis_angle(non_unit_axis, angle_90);
 
         // The function should normalize the axis, so the result should be the same as with a unit axis
@@ -236,28 +289,123 @@ mod tests {
     #[test]
     fn test_from_axis_angle_cpp_cases() {
         // Test cases from the C++ implementation
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, 0.0), 
-                  QuatApprox(Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                0.0
+            ),
+            QuatApprox(Quat {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0
+            })
+        );
 
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, 0.0), 
-                  QuatApprox(Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0
+                },
+                0.0
+            ),
+            QuatApprox(Quat {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0
+            })
+        );
 
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, 0.0), 
-                  QuatApprox(Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0
+                },
+                0.0
+            ),
+            QuatApprox(Quat {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0
+            })
+        );
 
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI_2), 
-                  QuatApprox(Quat { x: 0.7071, y: 0.0, z: 0.0, w: 0.7071 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                PI_2
+            ),
+            QuatApprox(Quat {
+                x: 0.7071,
+                y: 0.0,
+                z: 0.0,
+                w: 0.7071
+            })
+        );
 
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, PI), 
-                  QuatApprox(Quat { x: 0.0, y: 1.0, z: 0.0, w: 0.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0
+                },
+                PI
+            ),
+            QuatApprox(Quat {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+                w: 0.0
+            })
+        );
 
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, PI_4), 
-                  QuatApprox(Quat { x: 0.0, y: 0.0, z: 0.38268343, w: 0.92387953 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0
+                },
+                PI_4
+            ),
+            QuatApprox(Quat {
+                x: 0.0,
+                y: 0.0,
+                z: 0.38268343,
+                w: 0.92387953
+            })
+        );
 
         // Normalized vector (1/√3, 1/√3, 1/√3)
-        let normalized_vec = Vec3 { x: 0.57735027, y: 0.57735027, z: 0.57735027 };
-        assert_eq!(Quat::from_axis_angle(normalized_vec, PI_2), 
-                  QuatApprox(Quat { x: 0.40824829, y: 0.40824829, z: 0.40824829, w: 0.70710678 }));
+        let normalized_vec = Vec3 {
+            x: 0.57735027,
+            y: 0.57735027,
+            z: 0.57735027,
+        };
+        assert_eq!(
+            Quat::from_axis_angle(normalized_vec, PI_2),
+            QuatApprox(Quat {
+                x: 0.40824829,
+                y: 0.40824829,
+                z: 0.40824829,
+                w: 0.70710678
+            })
+        );
     }
 
     #[test]
@@ -268,7 +416,12 @@ mod tests {
         assert_eq!(inv_identity, identity);
 
         // Test inverse of arbitrary quaternion
-        let q = Quat { x: 0.5, y: 0.5, z: 0.5, w: 0.5 };
+        let q = Quat {
+            x: 0.5,
+            y: 0.5,
+            z: 0.5,
+            w: 0.5,
+        };
         let inv_q = q.inverse();
 
         // For a unit quaternion, the inverse is the conjugate (negated x, y, z components)
@@ -288,8 +441,16 @@ mod tests {
     #[test]
     fn test_from_look_rotation() {
         // Test looking along positive z-axis with up as positive y-axis
-        let forward = Vec3 { x: 0.0, y: 0.0, z: 1.0 };
-        let up = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
+        let forward = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
+        let up = Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
         let q = Quat::from_look_rotation(forward, up);
 
         // This should be identity quaternion (no rotation needed)
@@ -299,7 +460,11 @@ mod tests {
         assert!((q.w - 1.0).abs() < 1e-6);
 
         // Test looking along negative z-axis (180 degree rotation around y-axis)
-        let backward = Vec3 { x: 0.0, y: 0.0, z: -1.0 };
+        let backward = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: -1.0,
+        };
         let q_back = Quat::from_look_rotation(backward, up);
 
         // Rotating a vector along positive z by this quaternion should give negative z
@@ -309,7 +474,11 @@ mod tests {
         assert!((rotated.z + 1.0).abs() < 1e-6);
 
         // Test looking along positive x-axis (90 degree rotation around y-axis)
-        let right = Vec3 { x: 1.0, y: 0.0, z: 0.0 };
+        let right = Vec3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
         let q_right = Quat::from_look_rotation(right, up);
 
         // Rotating a vector along positive z by this quaternion should give positive x
@@ -322,34 +491,96 @@ mod tests {
     #[test]
     fn test_from_look_rotation_cpp_cases() {
         // Test cases from the C++ implementation
-        let forward = Vec3 { x: 0.0, y: 0.0, z: 1.0 };
-        let up = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
+        let forward = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
+        let up = Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
 
         // Identity (looking forward with up as +Y)
-        assert_eq!(Quat::from_look_rotation(forward, up), 
-                  QuatApprox(Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
+        assert_eq!(
+            Quat::from_look_rotation(forward, up),
+            QuatApprox(Quat {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0
+            })
+        );
 
         // Look right (+X)
-        let right = Vec3 { x: 1.0, y: 0.0, z: 0.0 };
+        let right = Vec3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
         let q_right = Quat::from_look_rotation(right, up);
-        assert_eq!(q_right * forward, Vec3Approx(Vec3 { x: 1.0, y: 0.0, z: 0.0 }));
+        assert_eq!(
+            q_right * forward,
+            Vec3Approx(Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0
+            })
+        );
 
         // Look up (+Y), using +Z as up to avoid zero cross
-        let up_dir = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
-        let z_up = Vec3 { x: 0.0, y: 0.0, z: 1.0 };
+        let up_dir = Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+        let z_up = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
         let q_up = Quat::from_look_rotation(up_dir, z_up);
-        assert_eq!(q_up * forward, Vec3Approx(Vec3 { x: 0.0, y: 1.0, z: 0.0 }));
+        assert_eq!(
+            q_up * forward,
+            Vec3Approx(Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0
+            })
+        );
 
         // Look backward (-Z)
-        let backward = Vec3 { x: 0.0, y: 0.0, z: -1.0 };
+        let backward = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: -1.0,
+        };
         let q_back = Quat::from_look_rotation(backward, up);
-        assert_eq!(q_back * forward, Vec3Approx(Vec3 { x: 0.0, y: 0.0, z: -1.0 }));
+        assert_eq!(
+            q_back * forward,
+            Vec3Approx(Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0
+            })
+        );
 
         // Arbitrary direction
-        let arbitrary = Vec3 { x: 1.0, y: 1.0, z: 1.0 };
+        let arbitrary = Vec3 {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        };
         let q_arbitrary = Quat::from_look_rotation(arbitrary, up);
-        assert_eq!(q_arbitrary * forward, 
-                  Vec3Approx(Vec3 { x: 0.57735027, y: 0.57735027, z: 0.57735027 }));
+        assert_eq!(
+            q_arbitrary * forward,
+            Vec3Approx(Vec3 {
+                x: 0.57735027,
+                y: 0.57735027,
+                z: 0.57735027
+            })
+        );
     }
 
     #[test]
@@ -360,14 +591,20 @@ mod tests {
         assert_eq!(normalized, q);
 
         // Test normalizing a non-unit quaternion
-        let q2 = Quat { x: 2.0, y: 0.0, z: 0.0, w: 0.0 };
+        let q2 = Quat {
+            x: 2.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        };
         let normalized2 = q2.normalized();
 
         // Length of normalized quaternion should be 1.0
-        let length = (normalized2.x * normalized2.x + 
-                      normalized2.y * normalized2.y + 
-                      normalized2.z * normalized2.z + 
-                      normalized2.w * normalized2.w).sqrt();
+        let length = (normalized2.x * normalized2.x
+            + normalized2.y * normalized2.y
+            + normalized2.z * normalized2.z
+            + normalized2.w * normalized2.w)
+            .sqrt();
         assert!((length - 1.0).abs() < 1e-6);
 
         // Direction should be preserved
@@ -377,7 +614,12 @@ mod tests {
         assert_eq!(normalized2.w, 0.0);
 
         // Test normalizing a zero quaternion (should return identity)
-        let zero_q = Quat { x: 0.0, y: 0.0, z: 0.0, w: 0.0 };
+        let zero_q = Quat {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        };
         let normalized_zero = zero_q.normalized();
         assert_eq!(normalized_zero, Quat::identity());
     }
@@ -391,15 +633,33 @@ mod tests {
 
         // Test multiplication of arbitrary quaternions
         // Rotation around x-axis by 90 degrees
-        let q_x_90 = Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI / 2.0);
+        let q_x_90 = Quat::from_axis_angle(
+            Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            PI / 2.0,
+        );
         // Rotation around y-axis by 90 degrees
-        let q_y_90 = Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, PI / 2.0);
+        let q_y_90 = Quat::from_axis_angle(
+            Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            PI / 2.0,
+        );
 
         // Applying rotations in sequence: first around x, then around y
         let combined = q_y_90 * q_x_90;
 
         // Test the combined rotation on a vector
-        let v = Vec3 { x: 0.0, y: 0.0, z: 1.0 };
+        let v = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
         let rotated = combined * v;
 
         // Verify the rotation step by step:
@@ -430,42 +690,151 @@ mod tests {
         let identity = Quat::identity();
 
         // Identity multiplication
-        assert_eq!(identity * Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI_4), 
-                  QuatApprox(Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI_4)));
+        assert_eq!(
+            identity
+                * Quat::from_axis_angle(
+                    Vec3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0
+                    },
+                    PI_4
+                ),
+            QuatApprox(Quat::from_axis_angle(
+                Vec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                PI_4
+            ))
+        );
 
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, PI_4) * identity, 
-                  QuatApprox(Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, PI_4)));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0
+                },
+                PI_4
+            ) * identity,
+            QuatApprox(Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0
+                },
+                PI_4
+            ))
+        );
 
         // Non-commutativity test
-        let q_x = Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI_2);
-        let q_y = Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, PI_2);
+        let q_x = Quat::from_axis_angle(
+            Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            PI_2,
+        );
+        let q_y = Quat::from_axis_angle(
+            Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            PI_2,
+        );
         assert_ne!(q_x * q_y, QuatApprox(q_y * q_x));
 
         // Rotation around same axis is additive
-        let q_z_1 = Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, PI_2);
-        let q_z_2 = Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, PI_2);
-        assert_eq!(q_z_1 * q_z_2, QuatApprox(Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, PI)));
+        let q_z_1 = Quat::from_axis_angle(
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            PI_2,
+        );
+        let q_z_2 = Quat::from_axis_angle(
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            PI_2,
+        );
+        assert_eq!(
+            q_z_1 * q_z_2,
+            QuatApprox(Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0
+                },
+                PI
+            ))
+        );
 
         // Associativity test
-        let q_x_45 = Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI_4);
-        let q_y_45 = Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, PI_4);
-        let q_z_45 = Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, PI_4);
+        let q_x_45 = Quat::from_axis_angle(
+            Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            PI_4,
+        );
+        let q_y_45 = Quat::from_axis_angle(
+            Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            PI_4,
+        );
+        let q_z_45 = Quat::from_axis_angle(
+            Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            PI_4,
+        );
 
-        assert_eq!((q_x_45 * q_y_45) * q_z_45, 
-                  QuatApprox(q_x_45 * (q_y_45 * q_z_45)));
+        assert_eq!(
+            (q_x_45 * q_y_45) * q_z_45,
+            QuatApprox(q_x_45 * (q_y_45 * q_z_45))
+        );
     }
 
     #[test]
     fn test_quat_vec_multiplication() {
         // Test rotation of a vector by identity quaternion (no rotation)
         let identity = Quat::identity();
-        let v = Vec3 { x: 1.0, y: 2.0, z: 3.0 };
+        let v = Vec3 {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
         let rotated = identity * v;
         assert_eq!(rotated, v);
 
         // Test rotation around x-axis by 90 degrees
-        let q_x_90 = Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI / 2.0);
-        let v2 = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
+        let q_x_90 = Quat::from_axis_angle(
+            Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            PI / 2.0,
+        );
+        let v2 = Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
         let rotated2 = q_x_90 * v2;
 
         // y-axis rotated 90° around x-axis becomes negative z-axis
@@ -475,8 +844,19 @@ mod tests {
         assert!((rotated2.z - 1.0).abs() < 1e-6);
 
         // Test rotation around y-axis by 90 degrees
-        let q_y_90 = Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, PI / 2.0);
-        let v3 = Vec3 { x: 0.0, y: 0.0, z: 1.0 };
+        let q_y_90 = Quat::from_axis_angle(
+            Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            PI / 2.0,
+        );
+        let v3 = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
         let rotated3 = q_y_90 * v3;
 
         // z-axis rotated 90° around y-axis becomes positive x-axis
@@ -491,45 +871,208 @@ mod tests {
         // Test cases from the C++ implementation
 
         // Rotation around y-axis by 90 degrees
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, PI_2) * Vec3 { x: 1.0, y: 0.0, z: 0.0 }, 
-                  Vec3Approx(Vec3 { x: 0.0, y: 0.0, z: -1.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0
+                },
+                PI_2
+            ) * Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0
+            },
+            Vec3Approx(Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0
+            })
+        );
 
         // Rotation around x-axis by 180 degrees
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI) * Vec3 { x: 0.0, y: 1.0, z: 0.0 }, 
-                  Vec3Approx(Vec3 { x: 0.0, y: -1.0, z: 0.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                PI
+            ) * Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0
+            },
+            Vec3Approx(Vec3 {
+                x: 0.0,
+                y: -1.0,
+                z: 0.0
+            })
+        );
 
         // Identity rotation
-        assert_eq!(Quat::identity() * Vec3 { x: 1.0, y: 2.0, z: 3.0 }, 
-                  Vec3Approx(Vec3 { x: 1.0, y: 2.0, z: 3.0 }));
+        assert_eq!(
+            Quat::identity()
+                * Vec3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0
+                },
+            Vec3Approx(Vec3 {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0
+            })
+        );
 
         // Rotation around x-axis by 90 degrees
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, PI_2) * Vec3 { x: 0.0, y: 0.0, z: 1.0 }, 
-                  Vec3Approx(Vec3 { x: 0.0, y: -1.0, z: 0.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                PI_2
+            ) * Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0
+            },
+            Vec3Approx(Vec3 {
+                x: 0.0,
+                y: -1.0,
+                z: 0.0
+            })
+        );
 
         // Rotation around z-axis by 90 degrees
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, PI_2) * Vec3 { x: 1.0, y: 1.0, z: 0.0 }, 
-                  Vec3Approx(Vec3 { x: -1.0, y: 1.0, z: 0.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0
+                },
+                PI_2
+            ) * Vec3 {
+                x: 1.0,
+                y: 1.0,
+                z: 0.0
+            },
+            Vec3Approx(Vec3 {
+                x: -1.0,
+                y: 1.0,
+                z: 0.0
+            })
+        );
 
         // Rotation around z-axis by 90 degrees (another vector)
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, PI_2) * Vec3 { x: 1.0, y: 0.0, z: 0.0 }, 
-                  Vec3Approx(Vec3 { x: 0.0, y: 1.0, z: 0.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0
+                },
+                PI_2
+            ) * Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0
+            },
+            Vec3Approx(Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0
+            })
+        );
 
         // Rotation around z-axis by 45 degrees
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 0.0, z: 1.0 }, PI_4) * Vec3 { x: 1.0, y: 0.0, z: 0.0 }, 
-                  Vec3Approx(Vec3 { x: 0.7071067811865475, y: 0.7071067811865475, z: 0.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0
+                },
+                PI_4
+            ) * Vec3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0
+            },
+            Vec3Approx(Vec3 {
+                x: 0.7071067811865475,
+                y: 0.7071067811865475,
+                z: 0.0
+            })
+        );
 
         // Rotation around x-axis by 120 degrees
         let two_pi_3 = 2.0 * PI_3;
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 1.0, y: 0.0, z: 0.0 }, two_pi_3) * Vec3 { x: 0.0, y: 1.0, z: 0.0 }, 
-                  Vec3Approx(Vec3 { x: 0.0, y: -0.5, z: 0.8660254037844386 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0
+                },
+                two_pi_3
+            ) * Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0
+            },
+            Vec3Approx(Vec3 {
+                x: 0.0,
+                y: -0.5,
+                z: 0.8660254037844386
+            })
+        );
 
         // Rotation around y-axis by 360 degrees (full circle)
-        assert_eq!(Quat::from_axis_angle(Vec3 { x: 0.0, y: 1.0, z: 0.0 }, 2.0 * PI) * Vec3 { x: 0.0, y: 0.0, z: 1.0 }, 
-                  Vec3Approx(Vec3 { x: 0.0, y: 0.0, z: 1.0 }));
+        assert_eq!(
+            Quat::from_axis_angle(
+                Vec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0
+                },
+                2.0 * PI
+            ) * Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0
+            },
+            Vec3Approx(Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0
+            })
+        );
 
         // Rotation around normalized vector (1/√2, 1/√2, 0) by 180 degrees
-        let normalized_vec = Vec3 { x: 1.0, y: 1.0, z: 0.0 }.normalized();
-        assert_eq!(Quat::from_axis_angle(normalized_vec, PI) * Vec3 { x: 1.0, y: 1.0, z: 1.0 }, 
-                  Vec3Approx(Vec3 { x: 1.0, y: 1.0, z: -1.0 }));
+        let normalized_vec = Vec3 {
+            x: 1.0,
+            y: 1.0,
+            z: 0.0,
+        }
+        .normalized();
+        assert_eq!(
+            Quat::from_axis_angle(normalized_vec, PI)
+                * Vec3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0
+                },
+            Vec3Approx(Vec3 {
+                x: 1.0,
+                y: 1.0,
+                z: -1.0
+            })
+        );
     }
 }

@@ -26,11 +26,21 @@ impl Vec3 {
     }
 
     pub fn as_vector4(self) -> Vec4 {
-        Vec4 {x: self.x, y: self.y, z: self.z, w: 0.}
+        Vec4 {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+            w: 0.,
+        }
     }
 
     pub fn as_point4(self) -> Vec4 {
-        Vec4 {x: self.x, y: self.y, z: self.z, w: 1.}
+        Vec4 {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+            w: 1.,
+        }
     }
 }
 
