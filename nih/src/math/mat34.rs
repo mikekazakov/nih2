@@ -1,5 +1,6 @@
+use super::mat33::Mat33;
+use super::mat44::Mat44;
 use super::vec3::Vec3;
-use crate::math::mat33::Mat33;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mat34(pub [f32; 12]);
@@ -84,12 +85,22 @@ impl Mat34 {
         ])
     }
 
-    pub fn to_mat33(&self) -> Mat33 {
+    pub fn as_mat33(&self) -> Mat33 {
         let m = &self.0;
         Mat33([
             m[0], m[1], m[2], //
             m[4], m[5], m[6], //
             m[8], m[9], m[10],
+        ])
+    }
+
+    pub fn as_mat44(&self) -> Mat44 {
+        let m = &self.0;
+        Mat44([
+            m[0], m[1], m[2], m[3], //
+            m[4], m[5], m[6], m[7], //
+            m[8], m[9], m[10], m[11], //
+            0.0, 0.0, 0.0, 1.0,
         ])
     }
 }
@@ -245,7 +256,7 @@ mod tests {
             9.0, 10.0, 11.0, 12.0,
         ]);
 
-        let mat33 = mat34.to_mat33();
+        let mat33 = mat34.as_mat33();
 
         let expected = Mat33([
             1.0, 2.0, 3.0, //

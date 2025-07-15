@@ -1,5 +1,6 @@
 pub mod mat33;
 pub mod mat34;
+pub mod mat44;
 pub mod quat;
 pub mod vec2;
 pub mod vec3;
