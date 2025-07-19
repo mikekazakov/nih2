@@ -1,6 +1,4 @@
-use super::mat33::Mat33;
-use super::mat44::Mat44;
-use super::vec3::Vec3;
+use crate::math::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mat34(pub [f32; 12]);

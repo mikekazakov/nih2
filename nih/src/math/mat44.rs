@@ -1,7 +1,4 @@
-use crate::math::mat33::Mat33;
-use crate::math::mat34::Mat34;
-use crate::math::vec3::Vec3;
-use crate::math::vec4::Vec4;
+use crate::math::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mat44(pub [f32; 16]);
@@ -295,12 +292,7 @@ mod tests {
     #[test]
     fn test_mat44_identity_mul_vec4() {
         let m = Mat44::identity();
-        let v = Vec4 {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-            w: 1.0,
-        };
+        let v = Vec4 { x: 1.0, y: 2.0, z: 3.0, w: 1.0 };
         let result = m * v;
         assert_eq!(result, v);
     }
@@ -327,64 +319,25 @@ mod tests {
     fn test_mat44_translate() {
         let t = Vec3 { x: 1.0, y: 2.0, z: 3.0 };
         let m = Mat44::translate(t);
-        let v = Vec4 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            w: 1.0,
-        };
+        let v = Vec4 { x: 0.0, y: 0.0, z: 0.0, w: 1.0 };
         let result = m * v;
-        assert_eq!(
-            result,
-            Vec4 {
-                x: 1.0,
-                y: 2.0,
-                z: 3.0,
-                w: 1.0
-            }
-        );
+        assert_eq!(result, Vec4 { x: 1.0, y: 2.0, z: 3.0, w: 1.0 });
     }
 
     #[test]
     fn test_mat44_scale_uniform() {
         let m = Mat44::scale_uniform(2.0);
-        let v = Vec4 {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-            w: 1.0,
-        };
+        let v = Vec4 { x: 1.0, y: 2.0, z: 3.0, w: 1.0 };
         let result = m * v;
-        assert_eq!(
-            result,
-            Vec4 {
-                x: 2.0,
-                y: 4.0,
-                z: 6.0,
-                w: 1.0
-            }
-        );
+        assert_eq!(result, Vec4 { x: 2.0, y: 4.0, z: 6.0, w: 1.0 });
     }
 
     #[test]
     fn test_mat44_scale_non_uniform() {
         let m = Mat44::scale_non_uniform(Vec3 { x: 2.0, y: 3.0, z: 4.0 });
-        let v = Vec4 {
-            x: 1.0,
-            y: 1.0,
-            z: 1.0,
-            w: 1.0,
-        };
+        let v = Vec4 { x: 1.0, y: 1.0, z: 1.0, w: 1.0 };
         let result = m * v;
-        assert_eq!(
-            result,
-            Vec4 {
-                x: 2.0,
-                y: 3.0,
-                z: 4.0,
-                w: 1.0
-            }
-        );
+        assert_eq!(result, Vec4 { x: 2.0, y: 3.0, z: 4.0, w: 1.0 });
     }
 
     #[test]
@@ -411,12 +364,7 @@ mod tests {
     #[test]
     fn test_mat44_rotate_xy() {
         let m = Mat44::rotate_xy(std::f32::consts::FRAC_PI_2); // 90 deg
-        let v = Vec4 {
-            x: 1.0,
-            y: 0.0,
-            z: 0.0,
-            w: 1.0,
-        };
+        let v = Vec4 { x: 1.0, y: 0.0, z: 0.0, w: 1.0 };
         let result = m * v;
         assert!((result.x.abs() < 1e-6) && ((result.y - 1.0).abs() < 1e-6));
     }
@@ -424,12 +372,7 @@ mod tests {
     #[test]
     fn test_mat44_rotate_yz() {
         let m = Mat44::rotate_yz(std::f32::consts::FRAC_PI_2);
-        let v = Vec4 {
-            x: 0.0,
-            y: 1.0,
-            z: 0.0,
-            w: 1.0,
-        };
+        let v = Vec4 { x: 0.0, y: 1.0, z: 0.0, w: 1.0 };
         let result = m * v;
         assert!((result.y.abs() < 1e-6) && ((result.z - 1.0).abs() < 1e-6));
     }
@@ -437,13 +380,19 @@ mod tests {
     #[test]
     fn test_mat44_rotate_zx() {
         let m = Mat44::rotate_zx(std::f32::consts::FRAC_PI_2);
-        let v = Vec4 {
-            x: 0.0,
-            y: 0.0,
-            z: 1.0,
-            w: 1.0,
-        };
+        let v = Vec4 { x: 0.0, y: 0.0, z: 1.0, w: 1.0 };
         let result = m * v;
         assert!((result.z.abs() < 1e-6) && ((result.x - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn test_mat44_inverse_non_invertible() {
+        // A matrix with a row of zeros is not invertible
+        let m = Mat44([
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, // This row makes the matrix singular
+        ]);
+        let inv = m.inverse();
+        assert_eq!(inv, Mat44::identity());
     }
 }

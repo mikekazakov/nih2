@@ -1,5 +1,7 @@
+use crate::math::*;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Vec2 {
+pub struct Vec2 {
     pub x: f32,
     pub y: f32,
 }
@@ -15,8 +17,10 @@ impl Vec2 {
     }
 }
 
-fn dot(a: Vec2, b: Vec2) -> f32 {
-    a.x * b.x + a.y * b.y
+impl Dot for Vec2 {
+    fn dot(self, rhs: Vec2) -> f32 {
+        self.x * rhs.x + self.y * rhs.y
+    }
 }
 
 // Distance from point `p` to line (v0, v1)
@@ -55,10 +59,7 @@ fn distance2(v0: Vec2, v1: Vec2, p: Vec2) -> f32 {
 impl std::ops::Neg for Vec2 {
     type Output = Vec2;
     fn neg(self) -> Vec2 {
-        Vec2 {
-            x: -self.x,
-            y: -self.y,
-        }
+        Vec2 { x: -self.x, y: -self.y }
     }
 }
 
@@ -66,10 +67,7 @@ impl std::ops::Neg for Vec2 {
 impl std::ops::Add for Vec2 {
     type Output = Vec2;
     fn add(self, other: Vec2) -> Vec2 {
-        Vec2 {
-            x: self.x + other.x,
-            y: self.y + other.y,
-        }
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
     }
 }
 
@@ -77,10 +75,7 @@ impl std::ops::Add for Vec2 {
 impl std::ops::Sub for Vec2 {
     type Output = Vec2;
     fn sub(self, other: Vec2) -> Vec2 {
-        Vec2 {
-            x: self.x - other.x,
-            y: self.y - other.y,
-        }
+        Vec2 { x: self.x - other.x, y: self.y - other.y }
     }
 }
 
@@ -88,10 +83,7 @@ impl std::ops::Sub for Vec2 {
 impl std::ops::Mul<f32> for Vec2 {
     type Output = Vec2;
     fn mul(self, scalar: f32) -> Vec2 {
-        Vec2 {
-            x: self.x * scalar,
-            y: self.y * scalar,
-        }
+        Vec2 { x: self.x * scalar, y: self.y * scalar }
     }
 }
 
@@ -99,10 +91,7 @@ impl std::ops::Mul<f32> for Vec2 {
 impl std::ops::Mul<Vec2> for f32 {
     type Output = Vec2;
     fn mul(self, vec: Vec2) -> Vec2 {
-        Vec2 {
-            x: vec.x * self,
-            y: vec.y * self,
-        }
+        Vec2 { x: vec.x * self, y: vec.y * self }
     }
 }
 
@@ -110,10 +99,7 @@ impl std::ops::Mul<Vec2> for f32 {
 impl std::ops::Div<f32> for Vec2 {
     type Output = Vec2;
     fn div(self, scalar: f32) -> Vec2 {
-        Vec2 {
-            x: self.x / scalar,
-            y: self.y / scalar,
-        }
+        Vec2 { x: self.x / scalar, y: self.y / scalar }
     }
 }
 
