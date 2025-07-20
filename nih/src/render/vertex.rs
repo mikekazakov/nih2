@@ -12,11 +12,11 @@ pub struct Vertex {
 impl Default for Vertex {
     fn default() -> Self {
         Self {
-            position: Vec4 { x: 0.0, y: 0.0, z: 0.0, w: 1.0 },
-            world_position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-            normal: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-            color: Vec4 { x: 0.0, y: 0.0, z: 0.0, w: 0.0 },
-            tex_coord: Vec2 { x: 0.0, y: 0.0 },
+            position: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            world_position: Vec3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(0.0, 0.0, 0.0),
+            color: Vec4::new(0.0, 0.0, 0.0, 0.0),
+            tex_coord: Vec2::new(0.0, 0.0),
         }
     }
 }

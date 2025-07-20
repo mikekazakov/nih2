@@ -7,6 +7,10 @@ pub struct Vec2 {
 }
 
 impl Vec2 {
+    pub const fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+
     pub fn length(self) -> f32 {
         dot(self, self).sqrt()
     }
