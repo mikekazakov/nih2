@@ -69,19 +69,52 @@ fn interpolate_vertex(v0: &Vertex, v1: &Vertex, t: f32) -> Vertex {
     }
 }
 
+pub fn clip_line(input_points: &[Vec4; 2]) -> ArrayVec<Vec4, 2> {
+    const CLIP_PLANES: [Vec4; 6] = [
+        Vec4::new(1.0, 0.0, 0.0, 1.0),  // Left
+        Vec4::new(-1.0, 0.0, 0.0, 1.0), // Right
+        Vec4::new(0.0, 1.0, 0.0, 1.0),  // Bottom
+        Vec4::new(0.0, -1.0, 0.0, 1.0), // Top
+        Vec4::new(0.0, 0.0, 1.0, 1.0),  // Near
+        Vec4::new(0.0, 0.0, -1.0, 1.0), // Far
+    ];
+    let mut p0 = input_points[0];
+    let mut p1 = input_points[1];
+    for &plane in &CLIP_PLANES {
+        let d0 = dot(p0, plane);
+        let d1 = dot(p1, plane);
+        let inside0 = d0 >= 0.0;
+        let inside1 = d1 >= 0.0;
+        if !inside0 && !inside1 {
+            return ArrayVec::new();
+        } else if inside0 && inside1 {
+            continue;
+        } else {
+            let t = d0 / (d0 - d1);
+            let clipped = (1.0 - t) * p0 + t * p1;
+            if !inside0 {
+                p0 = clipped;
+            } else {
+                p1 = clipped;
+            }
+        }
+    }
+    ArrayVec::from([p0, p1])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(Debug)]
-    struct TestCase {
-        name: &'static str,
-        input: [Vertex; 3],
-        expected: Vec<Vec4>,
-    }
-
     #[test]
     fn test_clip_triangle() {
+        #[derive(Debug)]
+        struct TestCase {
+            name: &'static str,
+            input: [Vertex; 3],
+            expected: Vec<Vec4>,
+        }
+
         let test_cases = [
             TestCase {
                 name: "No clipping",
@@ -221,6 +254,65 @@ mod tests {
                     "Vertex mismatch in test {}: got {:?}, expected {:?}",
                     case.name,
                     actual.position,
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_clip_line_cases() {
+        #[derive(Debug)]
+        struct TestCase {
+            name: &'static str,
+            input: [Vec4; 2],
+            expected: Vec<Vec4>,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "Fully inside",
+                input: [Vec4::new(0.0, 0.0, 0.0, 1.0), Vec4::new(0.5, 0.5, 0.0, 1.0)],
+                expected: Vec::from([Vec4::new(0.0, 0.0, 0.0, 1.0), Vec4::new(0.5, 0.5, 0.0, 1.0)]),
+            },
+            TestCase {
+                name: "Fully outside (left)",
+                input: [Vec4::new(-2.0, 0.0, 0.0, 1.0), Vec4::new(-1.5, 0.0, 0.0, 1.0)],
+                expected: Vec::new(),
+            },
+            TestCase {
+                name: "Partially clipped (left to inside)",
+                input: [Vec4::new(-2.0, 0.0, 0.0, 1.0), Vec4::new(0.5, 0.0, 0.0, 1.0)],
+                expected: Vec::from([Vec4::new(-1.0, 0.0, 0.0, 1.0), Vec4::new(0.5, 0.0, 0.0, 1.0)]),
+            },
+            TestCase {
+                name: "Partially clipped (inside to top)",
+                input: [Vec4::new(0.0, 0.0, 0.0, 1.0), Vec4::new(0.0, 2.0, 0.0, 1.0)],
+                expected: Vec::from([Vec4::new(0.0, 0.0, 0.0, 1.0), Vec4::new(0.0, 1.0, 0.0, 1.0)]),
+            },
+            TestCase {
+                name: "Clipped on both ends",
+                input: [Vec4::new(-2.0, -2.0, 0.0, 1.0), Vec4::new(2.0, 2.0, 0.0, 1.0)],
+                expected: Vec::from([Vec4::new(-1.0, -1.0, 0.0, 1.0), Vec4::new(1.0, 1.0, 0.0, 1.0)]),
+            },
+        ];
+
+        for case in &test_cases {
+            let result = clip_line(&case.input);
+
+            assert_eq!(result.len(), case.expected.len(), "Point count mismatch in test: {}", case.name);
+
+            for (actual, expected) in result.iter().zip(&case.expected) {
+                let delta = *actual - *expected;
+                let epsilon = 1e-5;
+                assert!(
+                    delta.x.abs() < epsilon
+                        && delta.y.abs() < epsilon
+                        && delta.z.abs() < epsilon
+                        && delta.w.abs() < epsilon,
+                    "Point mismatch in test {}: got {:?}, expected {:?}",
+                    case.name,
+                    actual,
                     expected
                 );
             }
