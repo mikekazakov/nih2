@@ -295,6 +295,31 @@ mod tests {
                 input: [Vec4::new(-2.0, -2.0, 0.0, 1.0), Vec4::new(2.0, 2.0, 0.0, 1.0)],
                 expected: Vec::from([Vec4::new(-1.0, -1.0, 0.0, 1.0), Vec4::new(1.0, 1.0, 0.0, 1.0)]),
             },
+            TestCase {
+                name: "Clipped against near and far planes",
+                input: [Vec4::new(0.0, 0.0, -2.0, 1.0), Vec4::new(0.0, 0.0, 2.0, 1.0)],
+                expected: Vec::from([Vec4::new(0.0, 0.0, -1.0, 1.0), Vec4::new(0.0, 0.0, 1.0, 1.0)]),
+            },
+            TestCase {
+                name: "Diagonal across entire clip space",
+                input: [Vec4::new(-2.0, -2.0, -2.0, 1.0), Vec4::new(2.0, 2.0, 2.0, 1.0)],
+                expected: Vec::from([Vec4::new(-1.0, -1.0, -1.0, 1.0), Vec4::new(1.0, 1.0, 1.0, 1.0)]),
+            },
+            TestCase {
+                name: "Inside to outside (bottom)",
+                input: [Vec4::new(0.0, 0.0, 0.0, 1.0), Vec4::new(0.0, -2.0, 0.0, 1.0)],
+                expected: Vec::from([Vec4::new(0.0, 0.0, 0.0, 1.0), Vec4::new(0.0, -1.0, 0.0, 1.0)]),
+            },
+            TestCase {
+                name: "Crossing only far plane",
+                input: [Vec4::new(0.0, 0.0, 0.5, 1.0), Vec4::new(0.0, 0.0, 2.0, 1.0)],
+                expected: Vec::from([Vec4::new(0.0, 0.0, 0.5, 1.0), Vec4::new(0.0, 0.0, 1.0, 1.0)]),
+            },
+            TestCase {
+                name: "Line entirely behind far plane",
+                input: [Vec4::new(0.0, 0.0, 2.1, 1.0), Vec4::new(0.5, 0.5, 2.2, 1.0)],
+                expected: Vec::new(),
+            },
         ];
 
         for case in &test_cases {
