@@ -2,16 +2,12 @@ extern crate sdl3;
 
 use nih::math::*;
 use nih::render::*;
+
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
-// use sdl3::pixels::Color;
-// use sdl3::pixels::PixelFormat;
 use sdl3::pixels::PixelFormatEnum;
 use sdl3::rect::Rect;
-use sdl3::surface::{Surface, SurfaceRef};
-
-// use sdl3::{Error, pixels};
-// use std::slice;
+use sdl3::surface::Surface;
 
 fn blit_to_window(buffer: &mut ColorBuffer, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
     let width = buffer.width as u32;
@@ -39,7 +35,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| e.to_string())?;
 
     let mut buf = ColorBuffer::new(window.size().0 as usize, window.size().1 as usize);
-    buf.fill(RGBA::new(255, 255, 0, 255));
+    // buf.fill(RGBA::new(0, 0, 0, 255));
 
     let mut tick = 0;
 
@@ -61,7 +57,24 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             tick += 1;
 
-            buf.fill(RGBA::new((tick % 256) as u8, 255, 0, 255));
+            // buf.fill(RGBA::new((tick % 256) as u8, 255, 0, 255));
+
+            buf.fill(RGBA::new(0, 0, 0, 255));
+            let viewport = Viewport { xmin: 0, ymin: 0, xmax: buf.width as u16, ymax: buf.height as u16 };
+            let lines = vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.5, 0.0, 0.0), //
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(-1.0, -1.0, 0.0),
+            ];
+            let mut cmd = DrawLinesCommand::default();
+            cmd.lines = &lines;
+            cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
+            cmd.model = Mat34::rotate_xy(tick as f32 / 100.0);
+            let mut framebuffer = Framebuffer { color_buffer: Some(&mut buf) };
+            draw_lines(&mut framebuffer, &viewport, &cmd);
         }
 
         blit_to_window(&mut buf, &window, &event_pump);

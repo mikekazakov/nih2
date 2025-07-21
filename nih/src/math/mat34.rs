@@ -106,7 +106,18 @@ impl Mat34 {
 // Vec3 = Mat34 * Vec3
 impl std::ops::Mul<Vec3> for Mat34 {
     type Output = Vec3;
+    fn mul(self, v: Vec3) -> Vec3 {
+        Vec3 {
+            x: self.0[0] * v.x + self.0[1] * v.y + self.0[2] * v.z + self.0[3],
+            y: self.0[4] * v.x + self.0[5] * v.y + self.0[6] * v.z + self.0[7],
+            z: self.0[8] * v.x + self.0[9] * v.y + self.0[10] * v.z + self.0[11],
+        }
+    }
+}
 
+// Vec3 = &Mat34 * Vec3
+impl std::ops::Mul<Vec3> for &Mat34 {
+    type Output = Vec3;
     fn mul(self, v: Vec3) -> Vec3 {
         Vec3 {
             x: self.0[0] * v.x + self.0[1] * v.y + self.0[2] * v.z + self.0[3],

@@ -1,5 +1,5 @@
+use super::super::math::*;
 use super::vertex::Vertex;
-use crate::math::*;
 use arrayvec::ArrayVec;
 use std::mem::swap;
 

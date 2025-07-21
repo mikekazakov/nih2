@@ -266,11 +266,9 @@ impl std::ops::Mul for Mat44 {
 }
 
 // Mat44 = &Mat44 * &Mat44
-// impl<'a, 'b> std::ops::Mul<&'b Mat44> for &'a Mat44 {
 impl std::ops::Mul<&Mat44> for &Mat44 {
     type Output = Mat44;
 
-    // fn mul(self, other: &'b Mat44) -> Mat44 {
     fn mul(self, other: &Mat44) -> Mat44 {
         let mut result = [0.0f32; 16];
         for i in 0..4 {

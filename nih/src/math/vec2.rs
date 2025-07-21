@@ -28,7 +28,7 @@ impl Dot for Vec2 {
 }
 
 // Distance from point `p` to line (v0, v1)
-fn distance(v0: Vec2, v1: Vec2, p: Vec2) -> f32 {
+pub fn distance(v0: Vec2, v1: Vec2, p: Vec2) -> f32 {
     let v01 = v1 - v0;
     let len_sq = dot(v01, v01);
 
@@ -43,7 +43,7 @@ fn distance(v0: Vec2, v1: Vec2, p: Vec2) -> f32 {
 }
 
 // Squared distance (cheaper, for comparisons only)
-fn distance2(v0: Vec2, v1: Vec2, p: Vec2) -> f32 {
+pub fn distance2(v0: Vec2, v1: Vec2, p: Vec2) -> f32 {
     let v01 = v1 - v0;
     let len_sq = dot(v01, v01);
 
