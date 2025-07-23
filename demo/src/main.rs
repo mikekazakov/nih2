@@ -61,18 +61,25 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             buf.fill(RGBA::new(0, 0, 0, 255));
             let viewport = Viewport { xmin: 0, ymin: 0, xmax: buf.width as u16, ymax: buf.height as u16 };
-            let lines = vec![
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(0.5, 0.0, 0.0), //
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 1.0, 0.0),
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(-1.0, -1.0, 0.0),
-            ];
+            // let lines = vec![
+            //     Vec3::new(0.0, 0.0, 0.0),
+            //     Vec3::new(0.5, 0.0, 0.0), //
+            //     Vec3::new(0.0, 0.0, 0.0),
+            //     Vec3::new(1.0, 1.0, 0.0),
+            //     Vec3::new(0.0, 0.0, 0.0),
+            //     Vec3::new(-1.0, -1.0, 0.0),
+            // ];
+
+            let lines = nih::math::sphere_to_aa_lines(32);
+
             let mut cmd = DrawLinesCommand::default();
             cmd.lines = &lines;
-            cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
-            cmd.model = Mat34::rotate_xy(tick as f32 / 100.0);
+            // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
+            cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
+            cmd.model = Mat34::rotate_yz(tick as f32 / 377.0)
+                * Mat34::rotate_xy(tick as f32 / 177.0)
+                * Mat34::rotate_zx(tick as f32 / 100.0)
+                * Mat34::scale_uniform(0.5);
             let mut framebuffer = Framebuffer { color_buffer: Some(&mut buf) };
             draw_lines(&mut framebuffer, &viewport, &cmd);
         }

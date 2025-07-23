@@ -15,16 +15,18 @@ impl RGBA {
     }
 
     pub fn to_u32(&self) -> u32 {
-        (self.r as u32) | ((self.g as u32) << 8) | ((self.b as u32) << 16) | ((self.a as u32) << 24)
+        // (self.r as u32) | ((self.g as u32) << 8) | ((self.b as u32) << 16) | ((self.a as u32) << 24)
+        bytemuck::cast(*self)
     }
 
     pub fn from_u32(packed: u32) -> Self {
-        Self {
-            r: (packed & 0xFF) as u8,
-            g: ((packed >> 8) & 0xFF) as u8,
-            b: ((packed >> 16) & 0xFF) as u8,
-            a: ((packed >> 24) & 0xFF) as u8,
-        }
+        // Self {
+        //     r: (packed & 0xFF) as u8,
+        //     g: ((packed >> 8) & 0xFF) as u8,
+        //     b: ((packed >> 16) & 0xFF) as u8,
+        //     a: ((packed >> 24) & 0xFF) as u8,
+        // }
+        bytemuck::cast(packed)
     }
 }
 

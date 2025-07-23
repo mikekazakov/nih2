@@ -51,6 +51,17 @@ fn apply_viewport(viewport: &Viewport, v: Vec3) -> Vec3 {
     )
 }
 
+fn blend(src: RGBA, dst: RGBA) -> RGBA {
+    let a = src.a as u32;
+    let ia = 255 - a;
+    RGBA {
+        r: ((src.r as u32 * a + dst.r as u32 * ia) >> 8) as u8,
+        g: ((src.g as u32 * a + dst.g as u32 * ia) >> 8) as u8,
+        b: ((src.b as u32 * a + dst.b as u32 * ia) >> 8) as u8,
+        a: dst.a,
+    }
+}
+
 pub fn draw_lines(framebuffer: &mut Framebuffer, viewport: &Viewport, command: &DrawLinesCommand) {
     let lines = command.lines;
     let len = lines.len();
@@ -153,7 +164,12 @@ pub fn draw_lines(framebuffer: &mut Framebuffer, viewport: &Viewport, command: &
             // }
 
             if let Some(ref mut buf) = color_buf_opt {
-                *buf.at_mut(screen_x as usize, screen_y as usize) = rgba.to_u32();
+                let dst = buf.at_mut(screen_x as usize, screen_y as usize);
+                if rgba.a == 255 {
+                    *dst = rgba.to_u32();
+                } else {
+                    *dst = blend(rgba, RGBA::from_u32(*dst)).to_u32();
+                }
             }
 
             error -= dy;
