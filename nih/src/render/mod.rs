@@ -3,6 +3,7 @@ pub mod clipper;
 pub mod draw_lines;
 pub mod framebuffer;
 pub mod mesh;
+pub mod rgba;
 pub mod vertex;
 pub mod viewport;
 
@@ -11,5 +12,6 @@ pub use clipper::*;
 pub use draw_lines::*;
 pub use framebuffer::*;
 pub use mesh::*;
+pub use rgba::*;
 pub use vertex::*;
 pub use viewport::*;

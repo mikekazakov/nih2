@@ -3,6 +3,7 @@ extern crate sdl3;
 use nih::math::*;
 use nih::render::*;
 
+use nih::render::rgba::RGBA;
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::pixels::PixelFormatEnum;
@@ -12,12 +13,12 @@ use sdl3::surface::Surface;
 mod io;
 
 struct State {
-    color_buffer: ColorBuffer,
+    color_buffer: Buffer<u32>,
     mesh: MeshData,
     tick: i32,
 }
 
-fn blit_to_window(buffer: &mut ColorBuffer, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
+fn blit_to_window(buffer: &mut Buffer<u32>, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
     let width = buffer.width as u32;
     let height = buffer.height as u32;
     let pitch = (buffer.stride * 4) as u32;
@@ -36,7 +37,7 @@ fn render(state: &mut State) {
     // buf.fill(RGBA::new((tick % 256) as u8, 255, 0, 255));
     let tick = state.tick;
 
-    state.color_buffer.fill(RGBA::new(0, 0, 0, 255));
+    state.color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
 
     let viewport =
         Viewport { xmin: 0, ymin: 0, xmax: state.color_buffer.width as u16, ymax: state.color_buffer.height as u16 };
@@ -102,7 +103,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let mut buf = ;
     // buf.fill(RGBA::new(0, 0, 0, 255));
     let mut state = State {
-        color_buffer: ColorBuffer::new(window.size().0 as usize, window.size().1 as usize), //
+        color_buffer: Buffer::<u32>::new(window.size().0 as usize, window.size().1 as usize), //
         mesh: mesh,
         tick: 0,
     };

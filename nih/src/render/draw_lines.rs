@@ -1,5 +1,6 @@
 use super::super::math::*;
 use super::*;
+use crate::render::rgba::RGBA;
 use arrayvec::ArrayVec;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
