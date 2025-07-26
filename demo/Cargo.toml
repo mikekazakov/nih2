@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 sdl3 = { version = "0", features = [] }
+wavefront_obj = "11.0.0"
 nih = { path = "../nih" }

@@ -1,5 +1,6 @@
 use super::super::math::*;
 use super::*;
+use arrayvec::ArrayVec;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawLinesCommand<'a> {
@@ -181,4 +182,40 @@ pub fn draw_lines(framebuffer: &mut Framebuffer, viewport: &Viewport, command: &
 
         i += 2;
     }
+}
+
+pub fn aabb_to_lines(aabb: AABB) -> ArrayVec<Vec3, 24> {
+    let mut lines = ArrayVec::new();
+
+    // bottom
+    lines.push(aabb.min);
+    lines.push(Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z));
+    lines.push(Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z));
+    lines.push(Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z));
+    lines.push(Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z));
+    lines.push(Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z));
+    lines.push(Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z));
+    lines.push(aabb.min);
+
+    // top
+    lines.push(aabb.max);
+    lines.push(Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z));
+    lines.push(Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z));
+    lines.push(Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z));
+    lines.push(Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z));
+    lines.push(Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z));
+    lines.push(Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z));
+    lines.push(aabb.max);
+
+    // vertical
+    lines.push(aabb.min);
+    lines.push(Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z));
+    lines.push(aabb.max);
+    lines.push(Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z));
+    lines.push(Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z));
+    lines.push(Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z));
+    lines.push(Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z));
+    lines.push(Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z));
+
+    lines
 }

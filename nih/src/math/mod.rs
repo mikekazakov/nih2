@@ -1,3 +1,4 @@
+pub mod aabb;
 pub mod dot;
 pub mod geom;
 pub mod mat33;
@@ -8,6 +9,7 @@ pub mod vec2;
 pub mod vec3;
 pub mod vec4;
 
+pub use aabb::*;
 pub use dot::*;
 pub use geom::*;
 pub use mat33::*;
