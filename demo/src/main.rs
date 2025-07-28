@@ -103,7 +103,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let mut buf = ;
     // buf.fill(RGBA::new(0, 0, 0, 255));
     let mut state = State {
-        color_buffer: Buffer::<u32>::new(window.size().0 as usize, window.size().1 as usize), //
+        color_buffer: Buffer::<u32>::new(window.size().0 as u16, window.size().1 as u16), //
         mesh: mesh,
         tick: 0,
     };

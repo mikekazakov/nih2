@@ -166,7 +166,7 @@ pub fn draw_lines(framebuffer: &mut Framebuffer, viewport: &Viewport, command: &
             // }
 
             if let Some(ref mut buf) = color_buf_opt {
-                let dst = buf.at_mut(screen_x as usize, screen_y as usize);
+                let dst = buf.at_mut(screen_x as u16, screen_y as u16);
                 if rgba.a == 255 {
                     *dst = rgba.to_u32();
                 } else {
