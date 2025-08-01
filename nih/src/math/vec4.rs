@@ -31,6 +31,10 @@ impl Vec4 {
         }
     }
 
+    pub fn xy(self) -> Vec2 {
+        Vec2 { x: self.x, y: self.y }
+    }
+
     pub fn xyz(self) -> Vec3 {
         Vec3 { x: self.x, y: self.y, z: self.z }
     }

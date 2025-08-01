@@ -50,41 +50,80 @@ fn render(state: &mut State) {
     //     Vec3::new(-1.0, -1.0, 0.0),
     // ];
 
-    let mut mesh_lines = Vec::<nih::math::Vec3>::default();
-    let num = state.mesh.positions.len() / 3;
-    // let num = 1;
-    for i in 0..num {
-        mesh_lines.push(state.mesh.positions[i * 3 + 0]);
-        mesh_lines.push(state.mesh.positions[i * 3 + 1]);
-        mesh_lines.push(state.mesh.positions[i * 3 + 1]);
-        mesh_lines.push(state.mesh.positions[i * 3 + 2]);
-        mesh_lines.push(state.mesh.positions[i * 3 + 2]);
-        mesh_lines.push(state.mesh.positions[i * 3 + 0]);
+    if false {
+        let mut mesh_lines = Vec::<nih::math::Vec3>::default();
+        let num = state.mesh.positions.len() / 3;
+        // let num = 1;
+        for i in 0..num {
+            mesh_lines.push(state.mesh.positions[i * 3 + 0]);
+            mesh_lines.push(state.mesh.positions[i * 3 + 1]);
+            mesh_lines.push(state.mesh.positions[i * 3 + 1]);
+            mesh_lines.push(state.mesh.positions[i * 3 + 2]);
+            mesh_lines.push(state.mesh.positions[i * 3 + 2]);
+            mesh_lines.push(state.mesh.positions[i * 3 + 0]);
+        }
+
+        // let lines = nih::math::sphere_to_aa_lines(32);
+
+        let mut cmd = DrawLinesCommand::default();
+        // cmd.lines = &lines;
+        // // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
+        // cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
+        // cmd.model = Mat34::rotate_yz(tick as f32 / 377.0)
+        //     * Mat34::rotate_xy(tick as f32 / 177.0)
+        //     * Mat34::rotate_zx(tick as f32 / 100.0)
+        //     * Mat34::scale_uniform(0.5);
+
+        cmd.lines = &mesh_lines;
+        // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
+        cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
+        cmd.model = Mat34::rotate_zx(tick as f32 / 100.0)
+            * Mat34::translate(Vec3::new(0.0, 0.0, 0.0))
+            * Mat34::scale_uniform(0.5);
+
+        let mut framebuffer = Framebuffer { color_buffer: Some(&mut state.color_buffer) };
+        draw_lines(&mut framebuffer, &viewport, &cmd);
+
+        let aabb_lines = aabb_to_lines(state.mesh.aabb);
+        cmd.lines = &aabb_lines;
+        draw_lines(&mut framebuffer, &viewport, &cmd);
     }
 
-    // let lines = nih::math::sphere_to_aa_lines(32);
+    {
+        // pub struct RasterizationCommand<'a> {
+        //     pub world_positions: &'a [Vec3],
+        //     pub normals: &'a [Vec3],    // TODO: support deriving the normals?
+        //     pub tex_coords: &'a [Vec2], // empty if absent
+        //     pub colors: &'a [Vec4],     // empty if absent
+        //     pub indices: &'a [u32],
+        //     pub model: Mat34,
+        //     pub view: Mat44,
+        //     pub projection: Mat44,
+        // }
+        let mut rasterizer = Rasterizer::new();
+        rasterizer.setup(viewport);
 
-    let mut cmd = DrawLinesCommand::default();
-    // cmd.lines = &lines;
-    // // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
-    // cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
-    // cmd.model = Mat34::rotate_yz(tick as f32 / 377.0)
-    //     * Mat34::rotate_xy(tick as f32 / 177.0)
-    //     * Mat34::rotate_zx(tick as f32 / 100.0)
-    //     * Mat34::scale_uniform(0.5);
+        let cmd = RasterizationCommand {
+            world_positions: &state.mesh.positions,
+            normals: &state.mesh.normals,
+            tex_coords: &state.mesh.tex_coords,
+            colors: &state.mesh.colors,
+            indices: &state.mesh.indices,
+            // model: Mat34::translate(Vec3::new(0.0, -0.8, 0.0)),
+            // model: Mat34::identity(),
+            model: Mat34::rotate_yz(tick as f32 / 377.0)
+                * Mat34::rotate_xy(tick as f32 / 177.0)
+                * Mat34::rotate_zx(tick as f32 / 100.0)
+                * Mat34::scale_uniform(0.5),
+            view: Mat44::identity(),
+            projection: Mat44::identity(),
+            culling: CullMode::CW,
+        };
+        rasterizer.commit(&cmd);
 
-    cmd.lines = &mesh_lines;
-    // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
-    cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
-    cmd.model =
-        Mat34::rotate_zx(tick as f32 / 100.0) * Mat34::translate(Vec3::new(0.0, 0.0, 0.0)) * Mat34::scale_uniform(0.5);
-
-    let mut framebuffer = Framebuffer { color_buffer: Some(&mut state.color_buffer) };
-    draw_lines(&mut framebuffer, &viewport, &cmd);
-
-    let aabb_lines = aabb_to_lines(state.mesh.aabb);
-    cmd.lines = &aabb_lines;
-    draw_lines(&mut framebuffer, &viewport, &cmd);
+        let mut framebuffer = Framebuffer { color_buffer: Some(&mut state.color_buffer) };
+        rasterizer.draw(&mut framebuffer);
+    }
 }
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {

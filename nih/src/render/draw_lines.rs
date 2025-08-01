@@ -1,6 +1,5 @@
 use super::super::math::*;
 use super::*;
-use crate::render::rgba::RGBA;
 use arrayvec::ArrayVec;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -164,6 +163,65 @@ pub fn draw_lines(framebuffer: &mut Framebuffer, viewport: &Viewport, command: &
             //     let pixel = color_buf.at_mut(screen_x as usize, screen_y as usize);
             //     *pixel = rgba.to_u32();
             // }
+
+            if let Some(ref mut buf) = color_buf_opt {
+                let dst = buf.at_mut(screen_x as u16, screen_y as u16);
+                if rgba.a == 255 {
+                    *dst = rgba.to_u32();
+                } else {
+                    *dst = blend(rgba, RGBA::from_u32(*dst)).to_u32();
+                }
+            }
+
+            error -= dy;
+            if error < 0 {
+                y += y_step;
+                error += dx;
+            }
+        }
+
+        i += 2;
+    }
+}
+
+pub fn draw_screen_lines_unclipped(framebuffer: &mut Framebuffer, lines: &[Vec2], color: Vec4) {
+    let len = lines.len();
+    assert_eq!(len % 2, 0);
+    if len == 0 {
+        return;
+    }
+
+    let rgba = vec4_to_rgba(color);
+    let mut color_buf_opt = framebuffer.color_buffer.as_deref_mut();
+
+    let mut i = 0;
+
+    while i + 1 < len {
+        let mut x0 = lines[i + 0].x as i32;
+        let mut y0 = lines[i + 0].y as i32;
+        let mut x1 = lines[i + 1].x as i32;
+        let mut y1 = lines[i + 1].y as i32;
+
+        let steep = (y1 - y0).abs() > (x1 - x0).abs();
+        if steep {
+            std::mem::swap(&mut x0, &mut y0);
+            std::mem::swap(&mut x1, &mut y1);
+        }
+
+        if x0 > x1 {
+            std::mem::swap(&mut x0, &mut x1);
+            std::mem::swap(&mut y0, &mut y1);
+        }
+
+        let dx = x1 - x0;
+        let dy = (y1 - y0).abs();
+        let mut error = dx / 2;
+        let y_step = if y0 < y1 { 1 } else { -1 };
+        let mut y = y0;
+
+        for x in x0..=x1 {
+            let screen_x = if steep { y } else { x };
+            let screen_y = if steep { x } else { y };
 
             if let Some(ref mut buf) = color_buf_opt {
                 let dst = buf.at_mut(screen_x as u16, screen_y as u16);

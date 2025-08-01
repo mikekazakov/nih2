@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 arrayvec = "0.7.6"
 bytemuck = { version = "1.23.1", features = ["derive"] }
+rayon = "1.8"

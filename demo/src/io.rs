@@ -54,6 +54,10 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> nih::render::MeshData {
                         model.objects[0].normals[v2.2.unwrap()].y as f32,
                         model.objects[0].normals[v2.2.unwrap()].z as f32,
                     ));
+
+                    mesh.indices.push((mesh.positions.len() - 3) as u32);
+                    mesh.indices.push((mesh.positions.len() - 2) as u32);
+                    mesh.indices.push((mesh.positions.len() - 1) as u32);
                 }
                 _ => {}
             }
