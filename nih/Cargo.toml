@@ -8,3 +8,6 @@ arrayvec = "0.7.6"
 bytemuck = { version = "1.23.1", features = ["derive"] }
 rayon = "1.8"
 image = "0.25.6"
+
+[dev-dependencies]
+rstest = "0.18"

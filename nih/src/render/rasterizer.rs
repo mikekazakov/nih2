@@ -21,6 +21,9 @@ pub struct RasterizationCommand<'a> {
     pub normals: &'a [Vec3],    // empty if absent, will be derived automaticallt
     pub tex_coords: &'a [Vec2], // empty if absent
     pub colors: &'a [Vec4],     // empty if absent, .color will be used
+
+    /// Triangle indices: [t0v0, t0v1, t0v2, t1v0, t1v1, t1v2, ...].
+    /// Optional, monotonic indices to cover all world positions will be assumed if none is provided
     pub indices: &'a [u32],
     pub model: Mat34,
     pub view: Mat44,
@@ -53,19 +56,32 @@ impl Rasterizer {
     }
 
     pub fn commit(&mut self, command: &RasterizationCommand) {
-        if command.indices.len() < 3 {
+        let use_explicit_indices = !command.indices.is_empty();
+        let input_triangles_num = if use_explicit_indices {
+            command.indices.len() / 3
+        } else {
+            command.world_positions.len() / 3
+        };
+
+        if input_triangles_num == 0 {
             return;
         }
+
         let view_projection = command.projection * command.view;
         let normal_matrix = command.view.as_mat33() * command.model.as_mat33().inverse();
         let viewport_scale = self.viewport_scale;
 
-        let input_triangles_num = command.indices.len() / 3;
         for i in 0..input_triangles_num {
-            let input_triangle_idx = i * 3;
-            let i0 = command.indices[input_triangle_idx + 0] as usize;
-            let i1 = command.indices[input_triangle_idx + 1] as usize;
-            let i2 = command.indices[input_triangle_idx + 2] as usize;
+            let index = |n: usize| {
+                if use_explicit_indices {
+                    command.indices[i * 3 + n] as usize
+                } else {
+                    i * 3 + n
+                }
+            };
+            let i0 = index(0);
+            let i1 = index(1);
+            let i2 = index(2);
 
             let mut input_vertices = [Vertex::default(); 3];
             input_vertices[0].world_position = command.model * command.world_positions[i0];
@@ -289,6 +305,7 @@ impl Default for RasterizationCommand<'_> {
 mod tests {
     use super::*;
     use image::{ImageBuffer, Rgba, RgbaImage};
+    use rstest::rstest;
     use std::path::Path;
 
     fn compare_albedo_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) -> bool {
@@ -319,23 +336,6 @@ mod tests {
         assert!(compare_albedo_against_reference(result, reference));
     }
 
-    #[test]
-    fn triangle_simple_red() {
-        let positions = [
-            Vec3::new(0.0, 0.5, 0.0),   //
-            Vec3::new(-0.5, -0.5, 0.0), //
-            Vec3::new(0.5, -0.5, 0.0),
-        ];
-        let command = RasterizationCommand {
-            world_positions: &positions,
-            indices: &[0, 1, 2],
-            color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-            ..Default::default()
-        };
-        let albedo_buffer = render_to_64x64_albedo(&command);
-        assert_albedo_against_reference(&albedo_buffer, "rasterizer_triangle_simple_red.png");
-    }
-
     fn render_to_64x64_albedo(command: &RasterizationCommand) -> Buffer<u32> {
         let mut color_buffer = Buffer::<u32>::new(64, 64);
         color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
@@ -347,5 +347,23 @@ mod tests {
         rasterizer.draw(&mut framebuffer);
 
         color_buffer
+    }
+
+    #[rstest]
+    #[case(Vec4::new(0.0, 0.0, 0.0, 1.0), "rasterizer_triangle_simple_black.png")]
+    #[case(Vec4::new(1.0, 1.0, 1.0, 1.0), "rasterizer_triangle_simple_white.png")]
+    #[case(Vec4::new(1.0, 0.0, 0.0, 1.0), "rasterizer_triangle_simple_red.png")]
+    #[case(Vec4::new(0.0, 1.0, 0.0, 1.0), "rasterizer_triangle_simple_green.png")]
+    #[case(Vec4::new(0.0, 0.0, 1.0, 1.0), "rasterizer_triangle_simple_blue.png")]
+    #[case(Vec4::new(1.0, 1.0, 0.0, 1.0), "rasterizer_triangle_simple_yellow.png")]
+    #[case(Vec4::new(1.0, 0.0, 1.0, 1.0), "rasterizer_triangle_simple_purple.png")]
+    #[case(Vec4::new(0.0, 1.0, 1.0, 1.0), "rasterizer_triangle_simple_cyan.png")]
+    fn triangles_colored(#[case] color: Vec4, #[case] filename: &str) {
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
+            color,
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
     }
 }
