@@ -192,6 +192,18 @@ impl Rasterizer {
         x | 0xFF
     }
 
+    fn is_top_left(edge: Vec2) -> bool {
+        if edge.y < 0.0 {
+            return true; // left edge
+        }
+
+        if edge.y.abs() < 0.0001 && edge.x > 0.0 {
+            return true; // top edge
+        }
+
+        return false;
+    }
+
     fn draw_triangles(&self, framebuffer: &mut Framebuffer, vertices: &[Vertex]) {
         let triangles_num = vertices.len() / 3;
         if triangles_num == 0 {
@@ -211,6 +223,12 @@ impl Rasterizer {
             let v01 = (v1.position - v0.position).xy();
             let v12 = (v2.position - v1.position).xy();
             let v20 = (v0.position - v2.position).xy();
+            let is_v01_top_left = Self::is_top_left(v01);
+            let is_v12_top_left = Self::is_top_left(v12);
+            let is_v20_top_left = Self::is_top_left(v20);
+            let v01_bias = if is_v01_top_left { 0.0 } else { -0.02 };
+            let v12_bias = if is_v12_top_left { 0.0 } else { -0.02 };
+            let v20_bias = if is_v20_top_left { 0.0 } else { -0.02 };
 
             // TODO: color interpolation
             let color = RGBA::new(
@@ -232,9 +250,9 @@ impl Rasterizer {
                     let v1p = p - v1.position.xy();
                     let v2p = p - v2.position.xy();
 
-                    let det01p = Mat22([v01.x, v0p.x, v01.y, v0p.y]).det();
-                    let det12p = Mat22([v12.x, v1p.x, v12.y, v1p.y]).det();
-                    let det20p = Mat22([v20.x, v2p.x, v20.y, v2p.y]).det();
+                    let det01p = Mat22([v01.x, v0p.x, v01.y, v0p.y]).det() + v01_bias;
+                    let det12p = Mat22([v12.x, v1p.x, v12.y, v1p.y]).det() + v12_bias;
+                    let det20p = Mat22([v20.x, v2p.x, v20.y, v2p.y]).det() + v20_bias;
 
                     if det01p >= 0.0 && det12p >= 0.0 && det20p >= 0.0 {
                         if let Some(buffer) = &mut framebuffer.color_buffer {
@@ -308,10 +326,30 @@ mod tests {
     use rstest::rstest;
     use std::path::Path;
 
-    fn compare_albedo_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) -> bool {
-        let reference_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    fn reference_path<P: AsRef<Path>>(reference: P) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/reference_images/")
-            .join(reference);
+            .join(reference)
+    }
+
+    fn save_albedo_next_to_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) {
+        let mut actual_path = reference_path(reference);
+        actual_path.set_extension("actual.png");
+
+        let raw_rgba: Vec<u8> = result
+            .elems
+            .iter()
+            .flat_map(|&pixel| {
+                let bytes = pixel.to_le_bytes();
+                [bytes[0], bytes[1], bytes[2], bytes[3]]
+            })
+            .collect();
+        let img1: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(64, 64, raw_rgba).unwrap();
+        img1.save(actual_path).unwrap();
+    }
+
+    fn compare_albedo_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) -> bool {
+        let reference_path = reference_path(reference);
 
         let raw_rgba: Vec<u8> = result
             .elems
@@ -333,7 +371,11 @@ mod tests {
     }
 
     fn assert_albedo_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) {
-        assert!(compare_albedo_against_reference(result, reference));
+        let equal = compare_albedo_against_reference(result, &reference);
+        if !equal {
+            save_albedo_next_to_reference(result, &reference);
+        }
+        assert!(equal);
     }
 
     fn render_to_64x64_albedo(command: &RasterizationCommand) -> Buffer<u32> {
@@ -358,10 +400,37 @@ mod tests {
     #[case(Vec4::new(1.0, 1.0, 0.0, 1.0), "rasterizer_triangle_simple_yellow.png")]
     #[case(Vec4::new(1.0, 0.0, 1.0, 1.0), "rasterizer_triangle_simple_purple.png")]
     #[case(Vec4::new(0.0, 1.0, 1.0, 1.0), "rasterizer_triangle_simple_cyan.png")]
-    fn triangles_colored(#[case] color: Vec4, #[case] filename: &str) {
+    fn triangle_simple(#[case] color: Vec4, #[case] filename: &str) {
         let command = RasterizationCommand {
             world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
             color,
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
+    }
+
+    #[rstest]
+    #[case(Vec2::new(-1.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_0.png")]
+    #[case(Vec2::new(-0.75, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_1.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_2.png")]
+    #[case(Vec2::new(-0.25, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_3.png")]
+    #[case(Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_4.png")]
+    #[case(Vec2::new(0.25, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_5.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_6.png")]
+    #[case(Vec2::new(0.75, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_7.png")]
+    #[case(Vec2::new(1.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5),  "rasterizer_triangle_orientation_top_8.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-1.0, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_0.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.75, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_1.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_2.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.25, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_3.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.0, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_4.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.25, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_5.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.5, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_6.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.75, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_7.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(1.0, -0.5), Vec2::new(0.5, 0.5),  "rasterizer_triangle_orientation_bottom_8.png")]
+    fn triangle_orientation(#[case] v0: Vec2, #[case] v1: Vec2, #[case] v2: Vec2, #[case] filename: &str) {
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(v0.x, v0.y, 0.0), Vec3::new(v1.x, v1.y, 0.0), Vec3::new(v2.x, v2.y, 0.0)],
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
