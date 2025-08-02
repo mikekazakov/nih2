@@ -1,7 +1,7 @@
 use super::super::math::*;
 use super::*;
-use arrayvec::ArrayVec;
-use std::mem::swap;
+// use arrayvec::ArrayVec;
+// use std::mem::swap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CullMode {
@@ -18,14 +18,15 @@ pub enum CullMode {
 #[derive(Debug, Clone, Copy)]
 pub struct RasterizationCommand<'a> {
     pub world_positions: &'a [Vec3],
-    pub normals: &'a [Vec3],    // TODO: support deriving the normals?
+    pub normals: &'a [Vec3],    // empty if absent, will be derived automaticallt
     pub tex_coords: &'a [Vec2], // empty if absent
-    pub colors: &'a [Vec4],     // empty if absent
+    pub colors: &'a [Vec4],     // empty if absent, .color will be used
     pub indices: &'a [u32],
     pub model: Mat34,
     pub view: Mat44,
     pub projection: Mat44,
     pub culling: CullMode,
+    pub color: Vec4,
 }
 
 pub struct Rasterizer {
@@ -73,18 +74,26 @@ impl Rasterizer {
             input_vertices[0].position = view_projection * input_vertices[0].world_position.as_point4();
             input_vertices[1].position = view_projection * input_vertices[1].world_position.as_point4();
             input_vertices[2].position = view_projection * input_vertices[2].world_position.as_point4();
-            // TODO: derive automatically?
-            input_vertices[0].normal = normal_matrix * command.normals[i0];
-            input_vertices[1].normal = normal_matrix * command.normals[i1];
-            input_vertices[2].normal = normal_matrix * command.normals[i2];
-            if command.colors.is_empty() {
-                input_vertices[0].color = Vec4::new(1.0, 1.0, 1.0, 1.0);
-                input_vertices[1].color = Vec4::new(1.0, 1.0, 1.0, 1.0);
-                input_vertices[2].color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+            if command.normals.is_empty() {
+                let edge1 = input_vertices[1].world_position - input_vertices[0].world_position;
+                let edge2 = input_vertices[2].world_position - input_vertices[0].world_position;
+                let face_normal = cross(edge1, edge2).normalized();
+                input_vertices[0].normal = face_normal;
+                input_vertices[1].normal = face_normal;
+                input_vertices[2].normal = face_normal;
             } else {
-                input_vertices[0].color = command.colors[i0];
-                input_vertices[1].color = command.colors[i1];
-                input_vertices[2].color = command.colors[i2];
+                input_vertices[0].normal = normal_matrix * command.normals[i0];
+                input_vertices[1].normal = normal_matrix * command.normals[i1];
+                input_vertices[2].normal = normal_matrix * command.normals[i2];
+            }
+            if command.colors.is_empty() {
+                input_vertices[0].color = command.color;
+                input_vertices[1].color = command.color;
+                input_vertices[2].color = command.color;
+            } else {
+                input_vertices[0].color = command.colors[i0] * command.color;
+                input_vertices[1].color = command.colors[i1] * command.color;
+                input_vertices[2].color = command.colors[i2] * command.color;
             }
             if command.tex_coords.is_empty() {
                 input_vertices[0].tex_coord = Vec2::new(0.0, 0.0);
@@ -187,6 +196,15 @@ impl Rasterizer {
             let v12 = (v2.position - v1.position).xy();
             let v20 = (v0.position - v2.position).xy();
 
+            // TODO: color interpolation
+            let color = RGBA::new(
+                (v0.color.x * 255.0).clamp(0.0, 255.0) as u8, //
+                (v0.color.y * 255.0).clamp(0.0, 255.0) as u8, //
+                (v0.color.z * 255.0).clamp(0.0, 255.0) as u8, //
+                (v0.color.w * 255.0).clamp(0.0, 255.0) as u8,
+            )
+            .to_u32();
+
             let xmin = rt_xmin.max(v0.position.x.min(v1.position.x).min(v2.position.x) as i32);
             let xmax = rt_xmax.min(v0.position.x.max(v1.position.x).max(v2.position.x) as i32);
             let ymin = rt_ymin.max(v0.position.y.min(v1.position.y).min(v2.position.y) as i32);
@@ -205,7 +223,8 @@ impl Rasterizer {
                     if det01p >= 0.0 && det12p >= 0.0 && det20p >= 0.0 {
                         if let Some(buffer) = &mut framebuffer.color_buffer {
                             // *buffer.at_mut(x as u16, y as u16) = RGBA::new(127, 127, 127, 255).to_u32();
-                            *buffer.at_mut(x as u16, y as u16) = Self::idx_to_color_hash(i as u32);
+                            *buffer.at_mut(x as u16, y as u16) = color;
+                            // *buffer.at_mut(x as u16, y as u16) = Self::idx_to_color_hash(i as u32);
                         }
                     }
                 }
@@ -261,6 +280,72 @@ impl Default for RasterizationCommand<'_> {
             view: Mat44::identity(),
             projection: Mat44::identity(),
             culling: CullMode::None,
+            color: Vec4::new(1.0, 1.0, 1.0, 1.0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, Rgba, RgbaImage};
+    use std::path::Path;
+
+    fn compare_albedo_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) -> bool {
+        let reference_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/reference_images/")
+            .join(reference);
+
+        let raw_rgba: Vec<u8> = result
+            .elems
+            .iter()
+            .flat_map(|&pixel| {
+                let bytes = pixel.to_le_bytes();
+                [bytes[0], bytes[1], bytes[2], bytes[3]]
+            })
+            .collect();
+        let img1: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(64, 64, raw_rgba).unwrap();
+
+        let img2: RgbaImage = image::open(reference_path).unwrap().into_rgba8();
+
+        if img1.dimensions() != img2.dimensions() {
+            return false;
+        }
+
+        img1.pixels().zip(img2.pixels()).all(|(p1, p2)| p1 == p2)
+    }
+
+    fn assert_albedo_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) {
+        assert!(compare_albedo_against_reference(result, reference));
+    }
+
+    #[test]
+    fn triangle_simple_red() {
+        let positions = [
+            Vec3::new(0.0, 0.5, 0.0),   //
+            Vec3::new(-0.5, -0.5, 0.0), //
+            Vec3::new(0.5, -0.5, 0.0),
+        ];
+        let command = RasterizationCommand {
+            world_positions: &positions,
+            indices: &[0, 1, 2],
+            color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            ..Default::default()
+        };
+        let albedo_buffer = render_to_64x64_albedo(&command);
+        assert_albedo_against_reference(&albedo_buffer, "rasterizer_triangle_simple_red.png");
+    }
+
+    fn render_to_64x64_albedo(command: &RasterizationCommand) -> Buffer<u32> {
+        let mut color_buffer = Buffer::<u32>::new(64, 64);
+        color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+        let mut framebuffer = Framebuffer { color_buffer: Some(&mut color_buffer) };
+
+        let mut rasterizer = Rasterizer::new();
+        rasterizer.setup(Viewport::new(0, 0, 64, 64));
+        rasterizer.commit(&command);
+        rasterizer.draw(&mut framebuffer);
+
+        color_buffer
     }
 }

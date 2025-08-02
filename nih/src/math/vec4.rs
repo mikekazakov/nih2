@@ -40,7 +40,7 @@ impl Vec4 {
     }
 }
 
-// a * b
+// a . b
 impl Dot for Vec4 {
     fn dot(self, rhs: Vec4) -> f32 {
         self.x * rhs.x + self.y * rhs.y + self.z * rhs.z + self.w * rhs.w
@@ -68,6 +68,14 @@ impl std::ops::Sub for Vec4 {
     type Output = Vec4;
     fn sub(self, other: Vec4) -> Vec4 {
         Vec4 { x: self.x - other.x, y: self.y - other.y, z: self.z - other.z, w: self.w - other.w }
+    }
+}
+
+// Vec4 * Vec4
+impl std::ops::Mul<Vec4> for Vec4 {
+    type Output = Vec4;
+    fn mul(self, other: Vec4) -> Vec4 {
+        Vec4 { x: self.x * other.x, y: self.y * other.y, z: self.z * other.z, w: self.w * other.w }
     }
 }
 

@@ -34,7 +34,7 @@ impl Vec3 {
     }
 }
 
-// a * b
+// a . b
 impl Dot for Vec3 {
     fn dot(self, rhs: Vec3) -> f32 {
         self.x * rhs.x + self.y * rhs.y + self.z * rhs.z

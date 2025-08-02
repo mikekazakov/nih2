@@ -118,6 +118,7 @@ fn render(state: &mut State) {
             view: Mat44::identity(),
             projection: Mat44::identity(),
             culling: CullMode::CW,
+            color: Vec4::new(1.0, 0.0, 0.0, 1.0),
         };
         rasterizer.commit(&cmd);
 
