@@ -181,16 +181,16 @@ impl Rasterizer {
         self.draw_triangles(framebuffer, &self.vertices);
     }
 
-    fn idx_to_color_hash(mut x: u32) -> u32 {
-        // Mix the bits using a few bitwise operations and multiplications
-        x ^= x >> 16;
-        x = x.wrapping_mul(0x85ebca6b);
-        x ^= x >> 13;
-        x = x.wrapping_mul(0xc2b2ae35);
-        x ^= x >> 16;
-
-        x | 0xFF
-    }
+    // fn idx_to_color_hash(mut x: u32) -> u32 {
+    //     // Mix the bits using a few bitwise operations and multiplications
+    //     x ^= x >> 16;
+    //     x = x.wrapping_mul(0x85ebca6b);
+    //     x ^= x >> 13;
+    //     x = x.wrapping_mul(0xc2b2ae35);
+    //     x ^= x >> 16;
+    //
+    //     x | 0xFF
+    // }
 
     fn is_top_left(edge: Vec2) -> bool {
         if edge.y < 0.0 {
@@ -223,12 +223,18 @@ impl Rasterizer {
             let v01 = (v1.position - v0.position).xy();
             let v12 = (v2.position - v1.position).xy();
             let v20 = (v0.position - v2.position).xy();
+            let v02 = (v2.position - v0.position).xy();
+
+            let area_x_2 = v01.x * v02.y - v01.y * v02.x;
+
+            // const f32 det012 = det2D(v1.position - v0.position, v2.position - v0.position);
+
             let is_v01_top_left = Self::is_top_left(v01);
             let is_v12_top_left = Self::is_top_left(v12);
             let is_v20_top_left = Self::is_top_left(v20);
-            let v01_bias = if is_v01_top_left { 0.0 } else { -0.02 };
-            let v12_bias = if is_v12_top_left { 0.0 } else { -0.02 };
-            let v20_bias = if is_v20_top_left { 0.0 } else { -0.02 };
+            let v01_bias = if is_v01_top_left { 0.0 } else { -0.001 };
+            let v12_bias = if is_v12_top_left { 0.0 } else { -0.001 };
+            let v20_bias = if is_v20_top_left { 0.0 } else { -0.001 };
 
             // TODO: color interpolation
             let color = RGBA::new(
@@ -243,25 +249,63 @@ impl Rasterizer {
             let xmax = rt_xmax.min(v0.position.x.max(v1.position.x).max(v2.position.x) as i32);
             let ymin = rt_ymin.max(v0.position.y.min(v1.position.y).min(v2.position.y) as i32);
             let ymax = rt_ymax.min(v0.position.y.max(v1.position.y).max(v2.position.y) as i32);
+
+            let p_min = Vec2::new(xmin as f32 + 0.5, ymin as f32 + 0.5);
+            let v0p_min = p_min - v0.position.xy();
+            let v1p_min = p_min - v1.position.xy();
+            let v2p_min = p_min - v2.position.xy();
+            let edge0_min = v01.x * v0p_min.y - v01.y * v0p_min.x + v01_bias;
+            let edge1_min = v12.x * v1p_min.y - v12.y * v1p_min.x + v12_bias;
+            let edge2_min = v20.x * v2p_min.y - v20.y * v2p_min.x + v20_bias;
+            let edge0_dx = -v01.y;
+            let edge1_dx = -v12.y;
+            let edge2_dx = -v20.y;
+            let edge0_dy = v01.x;
+            let edge1_dy = v12.x;
+            let edge2_dy = v20.x;
+
+            let mut edge0_row = edge0_min;
+            let mut edge1_row = edge1_min;
+            let mut edge2_row = edge2_min;
+
             for y in ymin..=ymax {
+                let mut edge0 = edge0_row;
+                let mut edge1 = edge1_row;
+                let mut edge2 = edge2_row;
                 for x in xmin..=xmax {
-                    let p = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
-                    let v0p = p - v0.position.xy();
-                    let v1p = p - v1.position.xy();
-                    let v2p = p - v2.position.xy();
+                    if edge0 >= 0.0 && edge1 >= 0.0 && edge2 >= 0.0 {
+                        let mut discard = false;
+                        if let Some(buffer) = &mut framebuffer.depth_buffer {
+                            let z_f32 = v0.position.z * edge1 / area_x_2
+                                + v1.position.z * edge2 / area_x_2
+                                + v2.position.z * edge0 / area_x_2;
 
-                    let det01p = Mat22([v01.x, v0p.x, v01.y, v0p.y]).det() + v01_bias;
-                    let det12p = Mat22([v12.x, v1p.x, v12.y, v1p.y]).det() + v12_bias;
-                    let det20p = Mat22([v20.x, v2p.x, v20.y, v2p.y]).det() + v20_bias;
+                            assert!(z_f32 >= -1.0); // TODO: remove me
+                            assert!(z_f32 <= 1.0); // TODO: remove me
 
-                    if det01p >= 0.0 && det12p >= 0.0 && det20p >= 0.0 {
-                        if let Some(buffer) = &mut framebuffer.color_buffer {
-                            // *buffer.at_mut(x as u16, y as u16) = RGBA::new(127, 127, 127, 255).to_u32();
-                            *buffer.at_mut(x as u16, y as u16) = color;
-                            // *buffer.at_mut(x as u16, y as u16) = Self::idx_to_color_hash(i as u32);
+                            let z_u16 = ((z_f32 * 0.5 + 0.5) * 65535.0) as u16;
+
+                            let dst_z = buffer.at_mut(x as u16, y as u16);
+                            if (z_u16 < *dst_z) {
+                                *dst_z = z_u16;
+                            } else {
+                                discard = true;
+                            }
+                        }
+
+                        if !discard {
+                            if let Some(buffer) = &mut framebuffer.color_buffer {
+                                *buffer.at_mut(x as u16, y as u16) = color;
+                            }
                         }
                     }
+                    edge0 += edge0_dx;
+                    edge1 += edge1_dx;
+                    edge2 += edge2_dx;
                 }
+                edge0_row += edge0_dy;
+                edge1_row += edge1_dy;
+                edge2_row += edge2_dy;
             }
         }
     }
@@ -381,7 +425,8 @@ mod tests {
     fn render_to_64x64_albedo(command: &RasterizationCommand) -> Buffer<u32> {
         let mut color_buffer = Buffer::<u32>::new(64, 64);
         color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
-        let mut framebuffer = Framebuffer { color_buffer: Some(&mut color_buffer) };
+        let mut framebuffer = Framebuffer::default();
+        framebuffer.color_buffer = Some(&mut color_buffer);
 
         let mut rasterizer = Rasterizer::new();
         rasterizer.setup(Viewport::new(0, 0, 64, 64));
