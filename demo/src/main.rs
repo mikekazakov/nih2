@@ -42,6 +42,19 @@ fn blit_to_window(buffer: &mut Buffer<u32>, window: &sdl3::video::Window, event_
 }
 
 fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
+    // find max value apart from 65535
+    let mut max = 0;
+    let mut min = 65535;
+    buffer.elems.iter().for_each(|&x| {
+        if x > max && x != 65535 {
+            max = x;
+        }
+        if x < min {
+            min = x;
+        }
+    });
+    let delta = (max - min) as u32;
+
     let width = buffer.width as u32;
     let height = buffer.height as u32;
     let mut buffer_surface = Surface::new(width, height, PixelFormatEnum::ABGR8888.into()).unwrap();
@@ -49,12 +62,19 @@ fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, even
     buffer_surface.with_lock_mut(|pixels: &mut [u8]| {
         for y in 0..buffer.height {
             for x in 0..buffer.width {
-                let depth = buffer.at(x, y);
-                let gray = ((depth as u32 * 255) / 65535) as u8;
                 let offset = y as usize * pitch + x as usize * 4;
-                pixels[offset + 0] = gray; // B
-                pixels[offset + 1] = gray; // G
-                pixels[offset + 2] = gray; // R
+                let depth = buffer.at(x, y);
+                if depth == 65535 {
+                    // 255u8
+                    pixels[offset + 0] = 255; // B
+                    pixels[offset + 1] = 0; // G
+                    pixels[offset + 2] = 255; // R
+                } else {
+                    let gray = (((depth - min) as u32 * 255) / (delta)) as u8;
+                    pixels[offset + 0] = gray; // B
+                    pixels[offset + 1] = gray; // G
+                    pixels[offset + 2] = gray; // R
+                };
                 pixels[offset + 3] = 255; // A
             }
         }

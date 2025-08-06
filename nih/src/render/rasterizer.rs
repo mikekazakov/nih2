@@ -18,7 +18,7 @@ pub enum CullMode {
 #[derive(Debug, Clone, Copy)]
 pub struct RasterizationCommand<'a> {
     pub world_positions: &'a [Vec3],
-    pub normals: &'a [Vec3],    // empty if absent, will be derived automaticallt
+    pub normals: &'a [Vec3],    // empty if absent, will be derived automatically
     pub tex_coords: &'a [Vec2], // empty if absent
     pub colors: &'a [Vec4],     // empty if absent, .color will be used
 
@@ -227,6 +227,10 @@ impl Rasterizer {
 
             let area_x_2 = v01.x * v02.y - v01.y * v02.x;
 
+            if area_x_2 < 1.0 {
+                continue;
+            }
+
             // const f32 det012 = det2D(v1.position - v0.position, v2.position - v0.position);
 
             let is_v01_top_left = Self::is_top_left(v01);
@@ -268,31 +272,55 @@ impl Rasterizer {
             let mut edge1_row = edge1_min;
             let mut edge2_row = edge2_min;
 
+            // Precompute z interpolation increments
+            // let z0 = (v0.position.z * 0.5 + 0.5) * 65535.0;
+            // let z1 = (v1.position.z * 0.5 + 0.5) * 65535.0;
+            // let z2 = (v2.position.z * 0.5 + 0.5) * 65535.0;
+            // let z_total_min = z0.min(z1).min(z2);
+            // let z_total_max = z0.max(z1).max(z2);
+            // let z_f32_min = z0 * edge1_min / area_x_2 + z1 * edge2_min / area_x_2 + z2 * edge0_min / area_x_2;
+            // let z_f32_dx = (z0 * edge1_dx + z1 * edge2_dx + z2 * edge0_dx) / area_x_2;
+            // let z_f32_dy = (z0 * edge1_dy + z1 * edge2_dy + z2 * edge0_dy) / area_x_2;
+
+            // let mut z_f32_row = z_f32_min;
             for y in ymin..=ymax {
                 let mut edge0 = edge0_row;
                 let mut edge1 = edge1_row;
                 let mut edge2 = edge2_row;
+                // let mut z_f32 = z_f32_row;
                 for x in xmin..=xmax {
                     if edge0 >= 0.0 && edge1 >= 0.0 && edge2 >= 0.0 {
                         let mut discard = false;
                         if let Some(buffer) = &mut framebuffer.depth_buffer {
-                            let z_f32 = v0.position.z * edge1 / area_x_2
+                            // assert!(z_f32 >= -1.0); // TODO: remove me
+                            // assert!(z_f32 <= 1.0); // TODO: remove me
+                            // let z_u16 = ((z_f32 * 0.5 + 0.5) * 65535.0) as u16;
+
+                            let z_f32_direct = v0.position.z * edge1 / area_x_2
                                 + v1.position.z * edge2 / area_x_2
                                 + v2.position.z * edge0 / area_x_2;
+                            assert!(z_f32_direct >= -1.0); // TODO: remove me
+                            assert!(z_f32_direct <= 1.0); // TODO: remove me
+                            let z_u16_direct = ((z_f32_direct * 0.5 + 0.5) * 65535.0) as u16;
 
-                            assert!(z_f32 >= -1.0); // TODO: remove me
-                            assert!(z_f32 <= 1.0); // TODO: remove me
+                            // assert!(z_f32 * 1.005 >= z_total_min); // TODO: this check fails
+                            // assert!(z_f32 * 0.995 <= z_total_max); // TODO: this check fails
 
-                            let z_u16 = ((z_f32 * 0.5 + 0.5) * 65535.0) as u16;
+                            // let z_u16 = z_f32 as u16;
+                            let z_u16 = z_u16_direct;
+
+                            // assert!(z_u16  >= z_total_min as u16);
+                            // assert!(z_u16 <= z_total_max as u16);
+                            // let z_err: i32 = z_u16_direct as i32 - z_u16 as i32;
+                            // assert!(z_err.abs() < 5000);
 
                             let dst_z = buffer.at_mut(x as u16, y as u16);
-                            if (z_u16 < *dst_z) {
+                            if z_u16 < *dst_z {
                                 *dst_z = z_u16;
                             } else {
                                 discard = true;
                             }
                         }
-
                         if !discard {
                             if let Some(buffer) = &mut framebuffer.color_buffer {
                                 *buffer.at_mut(x as u16, y as u16) = color;
@@ -302,10 +330,12 @@ impl Rasterizer {
                     edge0 += edge0_dx;
                     edge1 += edge1_dx;
                     edge2 += edge2_dx;
+                    // z_f32 += z_f32_dx;
                 }
                 edge0_row += edge0_dy;
                 edge1_row += edge1_dy;
                 edge2_row += edge2_dy;
+                // z_f32_row += z_f32_dy;
             }
         }
     }
@@ -392,6 +422,22 @@ mod tests {
         img1.save(actual_path).unwrap();
     }
 
+    fn save_depth_next_to_reference<P: AsRef<Path>>(result: &Buffer<u16>, reference: P) {
+        let mut actual_path = reference_path(reference);
+        actual_path.set_extension("actual.png");
+
+        let raw_rgba: Vec<u8> = result
+            .elems
+            .iter()
+            .flat_map(|&pixel| {
+                let bytes = pixel.to_le_bytes();
+                [bytes[1], bytes[0], 0, 255]
+            })
+            .collect();
+        let img1: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(64, 64, raw_rgba).unwrap();
+        img1.save(actual_path).unwrap();
+    }
+
     fn compare_albedo_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) -> bool {
         let reference_path = reference_path(reference);
 
@@ -414,10 +460,37 @@ mod tests {
         img1.pixels().zip(img2.pixels()).all(|(p1, p2)| p1 == p2)
     }
 
+    fn compare_depth_against_reference<P: AsRef<Path>>(result: &Buffer<u16>, reference: P) -> bool {
+        let reference_path = reference_path(reference);
+        let reference_image: RgbaImage = image::open(reference_path).unwrap().into_rgba8();
+        if reference_image.width() != 64 || reference_image.height() != 64 {
+            return false;
+        }
+
+        for (x, y, pixel) in reference_image.enumerate_pixels() {
+            // reconstruct depth from R and G components
+            let reference_depth = (((pixel[0] as u16) << 8) | (pixel[1] as u16)) as i32;
+            let actual_depth = result.at(x as u16, y as u16) as i32;
+            let diff = (reference_depth - actual_depth).abs();
+            if diff > 100 {
+                return false; // 100 / 65535 ~= 0.15% error tolerance
+            }
+        }
+        true
+    }
+
     fn assert_albedo_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) {
         let equal = compare_albedo_against_reference(result, &reference);
         if !equal {
             save_albedo_next_to_reference(result, &reference);
+        }
+        assert!(equal);
+    }
+
+    fn assert_depth_against_reference<P: AsRef<Path>>(result: &Buffer<u16>, reference: P) {
+        let equal = compare_depth_against_reference(result, &reference);
+        if !equal {
+            save_depth_next_to_reference(result, &reference);
         }
         assert!(equal);
     }
@@ -434,6 +507,23 @@ mod tests {
         rasterizer.draw(&mut framebuffer);
 
         color_buffer
+    }
+
+    fn render_to_64x64_depth(command: &RasterizationCommand) -> Buffer<u16> {
+        let mut color_buffer = Buffer::<u32>::new(64, 64);
+        color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+        let mut depth_buffer = Buffer::<u16>::new(64, 64);
+        depth_buffer.fill(65535);
+        let mut framebuffer = Framebuffer::default();
+        framebuffer.color_buffer = Some(&mut color_buffer);
+        framebuffer.depth_buffer = Some(&mut depth_buffer);
+
+        let mut rasterizer = Rasterizer::new();
+        rasterizer.setup(Viewport::new(0, 0, 64, 64));
+        rasterizer.commit(&command);
+        rasterizer.draw(&mut framebuffer);
+
+        depth_buffer
     }
 
     #[rstest]
@@ -535,5 +625,41 @@ mod tests {
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
+    }
+
+    #[rstest]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_00.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.75), "rasterizer_depth_interpolation_large_01.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.5), "rasterizer_depth_interpolation_large_02.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.25), "rasterizer_depth_interpolation_large_03.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.0), "rasterizer_depth_interpolation_large_04.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.25), "rasterizer_depth_interpolation_large_05.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.5), "rasterizer_depth_interpolation_large_06.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.75), "rasterizer_depth_interpolation_large_07.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -1.0), "rasterizer_depth_interpolation_large_08.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.75), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_09.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.5), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_10.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.25), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_11.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_12.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.25), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_13.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.5), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_14.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.75), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_15.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_16.png")]
+    #[case(Vec3::new(-1.0, 1.0, 0.75), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_17.png")]
+    #[case(Vec3::new(-1.0, 1.0, 0.5), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_18.png")]
+    #[case(Vec3::new(-1.0, 1.0, 0.25), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_19.png")]
+    #[case(Vec3::new(-1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_20.png")]
+    #[case(Vec3::new(-1.0, 1.0, -0.25), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_21.png")]
+    #[case(Vec3::new(-1.0, 1.0, -0.5), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_22.png")]
+    #[case(Vec3::new(-1.0, 1.0, -0.75), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_23.png")]
+    #[case(Vec3::new(-1.0, 1.0, -1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_24.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, -1.0), "rasterizer_depth_interpolation_large_25.png")]
+    fn depth_interpolation(#[case] v0: Vec3, #[case] v1: Vec3, #[case] v2: Vec3, #[case] filename: &str) {
+        let command = RasterizationCommand {
+            world_positions: &[v0, v1, v2],
+            projection: Mat44::orthographic(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+            ..Default::default()
+        };
+        assert_depth_against_reference(&render_to_64x64_depth(&command), filename);
     }
 }
