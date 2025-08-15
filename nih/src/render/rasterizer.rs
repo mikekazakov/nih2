@@ -250,7 +250,7 @@ impl Rasterizer {
             let v1p_min = p_min - v1.position.xy();
             let v2p_min = p_min - v2.position.xy();
 
-            // Precompute edge functions increments
+            // Precompute edge functions start values and increments
             let edge0_min = v12.x * v1p_min.y - v12.y * v1p_min.x + v12_bias;
             let edge1_min = v20.x * v2p_min.y - v20.y * v2p_min.x + v20_bias;
             let edge2_min = v01.x * v0p_min.y - v01.y * v0p_min.x + v01_bias;
@@ -260,11 +260,8 @@ impl Rasterizer {
             let edge0_dy = v12.x;
             let edge1_dy = v20.x;
             let edge2_dy = v01.x;
-            let mut edge0_row = edge0_min;
-            let mut edge1_row = edge1_min;
-            let mut edge2_row = edge2_min;
 
-            // Precompute z interpolation increments
+            // Precompute z start value and interpolation increments
             // TODO: optimize/streamline this
             let z0 = (v0.position.z * 0.5 + 0.5) * 65535.0;
             let z1 = (v1.position.z * 0.5 + 0.5) * 65535.0;
@@ -275,24 +272,77 @@ impl Rasterizer {
             let z_24x8_min = (z_f32_min * 256.0) as i32 as u32;
             let z_24x8_dx = (z_f32_dx * 256.0) as i32;
             let z_24x8_dy = (z_f32_dy * 256.0) as i32;
-            let mut z_24x8_row = z_24x8_min; // starting depth at each consequent row
 
-            // Precompute 1/w interpolation increments
+            // Precompute color/w start values and interpolation increments
+            let r_over_w_min = edge0_min * v0.color.x * v0.position.w
+                + edge1_min * v1.color.x * v1.position.w
+                + edge2_min * v2.color.x * v2.position.w;
+            let r_over_w_dx = edge0_dx * v0.color.x * v0.position.w
+                + edge1_dx * v1.color.x * v1.position.w
+                + edge2_dx * v2.color.x * v2.position.w;
+            let r_over_w_dy = edge0_dy * v0.color.x * v0.position.w
+                + edge1_dy * v1.color.x * v1.position.w
+                + edge2_dy * v2.color.x * v2.position.w;
+            let g_over_w_min = edge0_min * v0.color.y * v0.position.w
+                + edge1_min * v1.color.y * v1.position.w
+                + edge2_min * v2.color.y * v2.position.w;
+            let g_over_w_dx = edge0_dx * v0.color.y * v0.position.w
+                + edge1_dx * v1.color.y * v1.position.w
+                + edge2_dx * v2.color.y * v2.position.w;
+            let g_over_w_dy = edge0_dy * v0.color.y * v0.position.w
+                + edge1_dy * v1.color.y * v1.position.w
+                + edge2_dy * v2.color.y * v2.position.w;
+            let b_over_w_min = edge0_min * v0.color.z * v0.position.w
+                + edge1_min * v1.color.z * v1.position.w
+                + edge2_min * v2.color.z * v2.position.w;
+            let b_over_w_dx = edge0_dx * v0.color.z * v0.position.w
+                + edge1_dx * v1.color.z * v1.position.w
+                + edge2_dx * v2.color.z * v2.position.w;
+            let b_over_w_dy = edge0_dy * v0.color.z * v0.position.w
+                + edge1_dy * v1.color.z * v1.position.w
+                + edge2_dy * v2.color.z * v2.position.w;
+
+            // Precompute 1/w start value and interpolation increments
             let inv_w_min = edge0_min * v0.position.w + edge1_min * v1.position.w + edge2_min * v2.position.w;
             let inv_w_dx = edge0_dx * v0.position.w + edge1_dx * v1.position.w + edge2_dx * v2.position.w;
             let inv_w_dy = edge0_dy * v0.position.w + edge1_dy * v1.position.w + edge2_dy * v2.position.w;
-            let mut inv_w_row = inv_w_min;
+
+            // let color_fp = (v0.color * l0 + v1.color * l1 + v2.color * l2) * inv_inv_w;
+            // let color = RGBA::new(
+            //     (color_fp.x * 255.0).clamp(0.0, 255.0) as u8, //
+            //     (color_fp.y * 255.0).clamp(0.0, 255.0) as u8, //
+            //     (color_fp.z * 255.0).clamp(0.0, 255.0) as u8, //
+            //     (color_fp.w * 255.0).clamp(0.0, 255.0) as u8,
+            // )
+            //     .to_u32();
 
             // let l0 = edge0 * v0.position.w;
             // let l1 = edge1 * v1.position.w;
             // let l2 = edge2 * v2.position.w;
             // let wp = l0 + l1 + l2;
 
+            // let edge0_min = v12.x * v1p_min.y - v12.y * v1p_min.x + v12_bias;
+            // let edge1_min = v20.x * v2p_min.y - v20.y * v2p_min.x + v20_bias;
+            // let edge2_min = v01.x * v0p_min.y - v01.y * v0p_min.x + v01_bias;
+
+            // Set up the initial values at each consequent row
+            let mut edge0_row = edge0_min; // starting value of edge function v12
+            let mut edge1_row = edge1_min; // starting value of edge function v20
+            let mut edge2_row = edge2_min; // starting value of edge function v01
+            let mut z_24x8_row = z_24x8_min; // starting depth
+            let mut r_over_w_row = r_over_w_min; // starting r/w
+            let mut g_over_w_row = g_over_w_min; // starting g/w
+            let mut b_over_w_row = b_over_w_min; // starting b/w
+            let mut inv_w_row = inv_w_min; // starting 1/w
+
             for y in ymin..=ymax {
                 let mut edge0 = edge0_row;
                 let mut edge1 = edge1_row;
                 let mut edge2 = edge2_row;
                 let mut inv_w = inv_w_row;
+                let mut r_over_w = r_over_w_row;
+                let mut g_over_w = g_over_w_row;
+                let mut b_over_w = b_over_w_row;
                 let mut z_24x8 = z_24x8_row;
 
                 for x in xmin..=xmax {
@@ -308,25 +358,16 @@ impl Rasterizer {
                             }
                         }
                         if !discard {
-                            let l0 = edge0 * v0.position.w; // == e0 / w0
-                            let l1 = edge1 * v1.position.w; // == e1 / w1
-                            let l2 = edge2 * v2.position.w; // == e2 / w2
                             let inv_inv_w = 1.0 / inv_w;
 
-                            // let wp = l0 + l1 + l2;
-                            // assert!((inv_w - wp).abs() / inv_w.abs() < 0.01);
-                            // let edge0_pc = l0 / inv_w;
-                            // let edge1_pc = l1 / inv_w;
-                            // let edge2_pc = l2 / inv_w;
-                            // let color_fp = v0.color * edge0_pc + v1.color * edge1_pc + v2.color * edge2_pc;
-
-                            let color_fp = (v0.color * l0 + v1.color * l1 + v2.color * l2) * inv_inv_w;
-
+                            let r = r_over_w * inv_inv_w;
+                            let g = g_over_w * inv_inv_w;
+                            let b = b_over_w * inv_inv_w;
                             let color = RGBA::new(
-                                (color_fp.x * 255.0).clamp(0.0, 255.0) as u8, //
-                                (color_fp.y * 255.0).clamp(0.0, 255.0) as u8, //
-                                (color_fp.z * 255.0).clamp(0.0, 255.0) as u8, //
-                                (color_fp.w * 255.0).clamp(0.0, 255.0) as u8,
+                                (r * 255.0).clamp(0.0, 255.0) as u8, //
+                                (g * 255.0).clamp(0.0, 255.0) as u8, //
+                                (b * 255.0).clamp(0.0, 255.0) as u8, //
+                                255,
                             )
                             .to_u32();
 
@@ -339,12 +380,18 @@ impl Rasterizer {
                     edge1 += edge1_dx;
                     edge2 += edge2_dx;
                     inv_w += inv_w_dx;
+                    r_over_w += r_over_w_dx;
+                    g_over_w += g_over_w_dx;
+                    b_over_w += b_over_w_dx;
                     z_24x8 = z_24x8.overflowing_add_signed(z_24x8_dx).0;
                 }
                 edge0_row += edge0_dy;
                 edge1_row += edge1_dy;
                 edge2_row += edge2_dy;
                 inv_w_row += inv_w_dy;
+                r_over_w_row += r_over_w_dy;
+                g_over_w_row += g_over_w_dy;
+                b_over_w_row += b_over_w_dy;
                 z_24x8_row = z_24x8_row.overflowing_add_signed(z_24x8_dy).0;
             }
         }

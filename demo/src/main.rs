@@ -1,11 +1,17 @@
 extern crate sdl3;
 
+use std::cell::RefCell;
+use std::time::{Duration, Instant};
+
 use nih::math::*;
 use nih::render::*;
+use nih::util::*;
 
 use nih::render::rgba::RGBA;
+use nih::util::profiler::Profiler;
 use sdl3::event::Event;
 use sdl3::keyboard::{Keycode, Mod};
+use sdl3::libc::stat;
 use sdl3::pixels::PixelFormatEnum;
 use sdl3::rect::Rect;
 use sdl3::surface::Surface;
@@ -24,6 +30,28 @@ struct State {
     mesh: MeshData,
     tick: i32,
     display_mode: DisplayMode,
+    timestamp: Instant,
+    t: Duration,
+    dt: Duration,
+    last_printout: Instant,
+    profiler: RefCell<Profiler>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            color_buffer: Buffer::<u32>::new(1, 1),
+            depth_buffer: Buffer::<u16>::new(1, 1),
+            mesh: MeshData::default(),
+            tick: 0,
+            display_mode: DisplayMode::Color,
+            timestamp: Instant::now(),
+            t: Duration::from_secs(0),
+            dt: Duration::from_secs(0),
+            last_printout: Instant::now(),
+            profiler: RefCell::new(Profiler::new()),
+        }
+    }
 }
 
 fn blit_to_window(buffer: &mut Buffer<u32>, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
@@ -192,9 +220,9 @@ fn render(state: &mut State) {
         cmd.indices = &state.mesh.indices;
         // model: Mat34::translate(Vec3::new(0.0, -0.8, 0.0)),
         // model: Mat34::identity(),
-        cmd.model = Mat34::rotate_yz(tick as f32 / 377.0)
-            * Mat34::rotate_xy(tick as f32 / 177.0)
-            * Mat34::rotate_zx(tick as f32 / 100.0)
+        cmd.model = Mat34::rotate_yz(/*tick as f32 */ state.t.as_secs_f32() / 3.77)
+            * Mat34::rotate_xy(/*tick as f32*/ state.t.as_secs_f32() / 1.77)
+            * Mat34::rotate_zx(/*tick as f32*/ state.t.as_secs_f32() / 1.10)
             * Mat34::scale_uniform(1.5);
         // cmd.view = Mat44::identity();
         // cmd.view = Mat44::translate(Vec3::new(0.0, 0.0, 1.0));
@@ -207,7 +235,11 @@ fn render(state: &mut State) {
         // color: Vec4::new(1.0, 0.0, 0.0, 1.0),
         // color: Vec4::new(1.0, 1.0, 1.0, 1.0),
         // };
-        rasterizer.commit(&cmd);
+
+        {
+            let _profile_commit_scope = profiler::ProfileScope::new("commit", &state.profiler);
+            rasterizer.commit(&cmd);
+        }
 
         // Z: [-1, 1]
         // near -> -1
@@ -219,7 +251,10 @@ fn render(state: &mut State) {
         let mut framebuffer = Framebuffer::default();
         framebuffer.color_buffer = Some(&mut state.color_buffer);
         framebuffer.depth_buffer = Some(&mut state.depth_buffer);
-        rasterizer.draw(&mut framebuffer);
+        {
+            let _profile_draw_scope = profiler::ProfileScope::new("draw", &state.profiler);
+            rasterizer.draw(&mut framebuffer);
+        }
     }
 }
 
@@ -238,13 +273,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // let mut buf = ;
     // buf.fill(RGBA::new(0, 0, 0, 255));
-    let mut state = State {
-        color_buffer: Buffer::<u32>::new(window.size().0 as u16, window.size().1 as u16), //
-        depth_buffer: Buffer::<u16>::new(window.size().0 as u16, window.size().1 as u16), //
-        mesh: mesh,
-        tick: 0,
-        display_mode: DisplayMode::Color,
-    };
+    let mut state = State::default();
+
+    state.color_buffer = Buffer::<u32>::new(window.size().0 as u16, window.size().1 as u16);
+    state.depth_buffer = Buffer::<u16>::new(window.size().0 as u16, window.size().1 as u16);
+    state.mesh = mesh;
 
     // let (models, materials) =
     //     tobj::load_obj("/Users/migun/Documents/gfx/Obj/teapot-2.obj", &tobj::LoadOptions::default())
@@ -283,12 +316,26 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             let position = window.position();
             let size = window.size();
-            let title =
-                format!("Window - pos({}x{}), size({}x{}): {}", position.0, position.1, size.0, size.1, state.tick);
+            let title = format!(
+                "Window - pos({}x{}), size({}x{}): {:.3}ms",
+                position.0,
+                position.1,
+                size.0,
+                size.1,
+                state.dt.as_secs_f32() * 1000.0
+            );
             window.set_title(&title).map_err(|e| e.to_string())?;
 
             state.tick += 1;
+            state.dt = state.timestamp.elapsed();
+            state.t += state.dt;
+            state.timestamp = Instant::now();
             render(&mut state);
+
+            if (state.timestamp - state.last_printout).as_secs() > 2 {
+                state.last_printout = state.timestamp;
+                state.profiler.borrow().print();
+            }
         }
 
         if state.display_mode == DisplayMode::Color {
