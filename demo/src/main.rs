@@ -11,7 +11,7 @@ use nih::render::rgba::RGBA;
 use nih::util::profiler::Profiler;
 use sdl3::event::Event;
 use sdl3::keyboard::{Keycode, Mod};
-use sdl3::libc::stat;
+// use sdl3::libc::stat;
 use sdl3::pixels::PixelFormatEnum;
 use sdl3::rect::Rect;
 use sdl3::surface::Surface;

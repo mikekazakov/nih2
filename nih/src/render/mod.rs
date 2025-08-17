@@ -5,6 +5,7 @@ pub mod framebuffer;
 pub mod mesh;
 pub mod rasterizer;
 pub mod rgba;
+pub mod tiled_buffer;
 pub mod vertex;
 pub mod viewport;
 
@@ -15,5 +16,6 @@ pub use framebuffer::*;
 pub use mesh::*;
 pub use rasterizer::*;
 pub use rgba::*;
+pub use tiled_buffer::*;
 pub use vertex::*;
 pub use viewport::*;
