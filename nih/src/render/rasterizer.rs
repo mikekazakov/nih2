@@ -32,24 +32,70 @@ pub struct RasterizationCommand<'a> {
     pub color: Vec4,
 }
 
+struct ScheduledTriangle {
+    tri_start: u16,
+}
+
+struct Tile {
+    triangles: Vec<ScheduledTriangle>,
+    local_viewport: Viewport,
+}
+
 pub struct Rasterizer {
     viewport: Viewport,
     viewport_scale: ViewportScale,
     vertices: Vec<Vertex>,
+    tiles: Vec<Tile>,
+    tiles_x: u16,
+    tiles_y: u16,
+}
+
+impl Default for Tile {
+    fn default() -> Self {
+        Self { triangles: Vec::new(), local_viewport: Viewport::new(0, 0, 1, 1) }
+    }
 }
 
 impl Rasterizer {
+    pub const TILE_WIDTH: usize = 64;
+    pub const TILE_HEIGHT: usize = 64;
+
     pub fn new() -> Self {
         return Rasterizer {
             viewport: Viewport::new(0, 0, 1, 1), //
             viewport_scale: ViewportScale::default(),
             vertices: Vec::new(), //
+            tiles: Vec::new(),
+            tiles_x: 1,
+            tiles_y: 1,
         };
     }
 
     pub fn setup(&mut self, viewport: Viewport) {
         assert!(viewport.xmax > viewport.xmin);
         assert!(viewport.ymax > viewport.ymin);
+        let width_px = (viewport.xmax - viewport.xmin) as usize;
+        let height_px = (viewport.ymax - viewport.ymin) as usize;
+        let tiles_x = (width_px + Self::TILE_WIDTH - 1) / Self::TILE_WIDTH;
+        let tiles_y = (height_px + Self::TILE_HEIGHT - 1) / Self::TILE_HEIGHT;
+        let tiles_num = tiles_x * tiles_y;
+
+        self.tiles_x = tiles_x as u16;
+        self.tiles_y = tiles_y as u16;
+        self.tiles.resize_with(tiles_num, Tile::default);
+        for y in 0..tiles_y {
+            for x in 0..tiles_x {
+                let tile = &mut self.tiles[y * tiles_x + x];
+                tile.triangles.clear();
+                tile.local_viewport = Viewport {
+                    xmin: viewport.xmin + x as u16 * Self::TILE_WIDTH as u16,
+                    ymin: viewport.ymin + y as u16 * Self::TILE_HEIGHT as u16,
+                    xmax: (viewport.xmin + (x as u16 + 1) * Self::TILE_WIDTH as u16).min(viewport.xmax),
+                    ymax: (viewport.ymin + (y as u16 + 1) * Self::TILE_HEIGHT as u16).min(viewport.ymax),
+                };
+            }
+        }
+
         self.viewport = viewport;
         self.viewport_scale = ViewportScale::new(viewport);
         self.vertices.clear();
@@ -70,6 +116,7 @@ impl Rasterizer {
         let view_projection = command.projection * command.view;
         let normal_matrix = command.view.as_mat33() * command.model.as_mat33().inverse();
         let viewport_scale = self.viewport_scale;
+        let scheduled_vertices_start = self.vertices.len();
 
         for i in 0..input_triangles_num {
             let index = |n: usize| {
@@ -121,21 +168,17 @@ impl Rasterizer {
                 input_vertices[2].tex_coord = command.tex_coords[i2];
             }
 
-            // pub fn clip_triangle(input_vertices: &[Vertex; 3]) -> ArrayVec<Vertex, 7> {
             let clipped_vertices = clip_triangle(&input_vertices);
             if clipped_vertices.is_empty() {
                 continue;
             }
 
-            // let mut clipped_vertex_idx = 1usize;
-            // while clipped_vertex_idx + 1 < clipped_vertices.len() {
             for clipped_vertex_idx in 1..clipped_vertices.len() - 1 {
                 let mut vertices = [
                     clipped_vertices[0],                      //
                     clipped_vertices[clipped_vertex_idx],     //
                     clipped_vertices[clipped_vertex_idx + 1], //
                 ];
-                // clipped_vertex_idx += 1;
 
                 vertices[0].position = perspective_divide(vertices[0].position);
                 vertices[1].position = perspective_divide(vertices[1].position);
@@ -159,6 +202,32 @@ impl Rasterizer {
                 self.vertices.extend_from_slice(&vertices);
             }
         }
+
+        if scheduled_vertices_start != self.vertices.len() {
+            let xmin = self.viewport.xmin as u32;
+            let ymin = self.viewport.ymin as u32;
+            for vert_idx in (scheduled_vertices_start..self.vertices.len()).step_by(3) {
+                let v0 = &self.vertices[vert_idx + 0];
+                let v1 = &self.vertices[vert_idx + 1];
+                let v2 = &self.vertices[vert_idx + 2];
+                let v_xmin = v0.position.x.min(v1.position.x).min(v2.position.x) as u32;
+                let v_xmax = v0.position.x.max(v1.position.x).max(v2.position.x) as u32;
+                let v_ymin = v0.position.y.min(v1.position.y).min(v2.position.y) as u32;
+                let v_ymax = v0.position.y.max(v1.position.y).max(v2.position.y) as u32;
+                // TODO: add less crude discarding by running simple edge functions
+                // TODO: check if this min() is required
+                let ind_xmin = ((v_xmin - xmin) / Self::TILE_WIDTH as u32).min(self.tiles_x as u32 - 1);
+                let ind_ymin = ((v_ymin - ymin) / Self::TILE_HEIGHT as u32).min(self.tiles_y as u32 - 1);
+                let ind_xmax = ((v_xmax - xmin) / Self::TILE_WIDTH as u32).min(self.tiles_x as u32 - 1);
+                let ind_ymax = ((v_ymax - ymin) / Self::TILE_HEIGHT as u32).min(self.tiles_y as u32 - 1);
+                for ind_y in ind_ymin..=ind_ymax {
+                    for ind_x in ind_xmin..=ind_xmax {
+                        let tile = &mut self.tiles[ind_y as usize * self.tiles_x as usize + ind_x as usize];
+                        tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 })
+                    }
+                }
+            }
+        }
     }
 
     pub fn draw(&mut self, framebuffer: &mut Framebuffer) {
@@ -166,19 +235,36 @@ impl Rasterizer {
             return;
         }
 
-        // let mut lines: Vec<Vec2> = Vec::new();
-        // let tri_num = self.vertices.len() / 3;
-        // for i in 0..tri_num {
-        //     lines.push(self.vertices[i * 3 + 0].position.xy());
-        //     lines.push(self.vertices[i * 3 + 1].position.xy());
-        //     lines.push(self.vertices[i * 3 + 1].position.xy());
-        //     lines.push(self.vertices[i * 3 + 2].position.xy());
-        //     lines.push(self.vertices[i * 3 + 2].position.xy());
-        //     lines.push(self.vertices[i * 3 + 0].position.xy());
-        // }
-        // draw_screen_lines_unclipped(framebuffer, &lines, Vec4::new(1.0, 1.0, 1.0, 1.0));
+        struct Job {
+            framebuffer_tile: FramebufferTile,
+            render_tile: *const Tile,
+        }
+        unsafe impl Send for Job {}
+        unsafe impl Sync for Job {}
 
-        self.draw_triangles(framebuffer, &self.vertices);
+        let mut jobs = Vec::<Job>::new();
+        for y in 0..self.tiles_y {
+            for x in 0..self.tiles_x {
+                let idx = (y * self.tiles_x + x) as usize;
+                let render_tile: *const Tile = &mut self.tiles[idx];
+                let framebuffer_tile = framebuffer.tile(x, y);
+                jobs.push(Job { framebuffer_tile, render_tile: render_tile });
+            }
+        }
+        use rayon::prelude::*;
+        jobs.par_iter_mut().for_each(|job| {
+            let render_tile = unsafe { &*job.render_tile };
+            let viewport = render_tile.local_viewport;
+            let vertices = &self.vertices;
+
+            let mut tile_verts = Vec::<Vertex>::new();
+            for tri in &render_tile.triangles {
+                tile_verts.push(vertices[tri.tri_start as usize + 0]);
+                tile_verts.push(vertices[tri.tri_start as usize + 1]);
+                tile_verts.push(vertices[tri.tri_start as usize + 2]);
+            }
+            self.draw_triangles(&mut job.framebuffer_tile, viewport, &tile_verts);
+        });
     }
 
     // fn idx_to_color_hash(mut x: u32) -> u32 {
@@ -204,16 +290,26 @@ impl Rasterizer {
         return false;
     }
 
-    fn draw_triangles(&self, framebuffer: &mut Framebuffer, vertices: &[Vertex]) {
+    fn draw_triangles(&self, framebuffer: &mut FramebufferTile, local_viewport: Viewport, vertices: &[Vertex]) {
         let triangles_num = vertices.len() / 3;
         if triangles_num == 0 {
             return;
         }
 
-        let rt_xmin = self.viewport.xmin.max(0) as i32;
-        let rt_xmax = self.viewport.xmax.min(framebuffer.width()) as i32 - 1;
-        let rt_ymin = self.viewport.ymin.max(0) as i32;
-        let rt_ymax = self.viewport.ymax.min(framebuffer.height()) as i32 - 1;
+        // let rt_xmin = self.viewport.xmin.max(0) as i32;
+        // let rt_xmax = self.viewport.xmax.min(framebuffer.width()) as i32 - 1;
+        // let rt_ymin = self.viewport.ymin.max(0) as i32;
+        // let rt_ymax = self.viewport.ymax.min(framebuffer.height()) as i32 - 1;
+
+        // const i32 rt_xmin = std::max<i32>(viewport.xmin, 0);
+        // const i32 rt_xmax = std::min<i32>(viewport.xmax, framebuffer.width()) - 1;
+        // const i32 rt_ymin = std::max<i32>(viewport.ymin, 0);
+        // const i32 rt_ymax = std::min<i32>(viewport.ymax, framebuffer.height()) - 1;
+
+        let rt_xmin = local_viewport.xmin.max(framebuffer.origin_x()) as i32;
+        let rt_xmax = local_viewport.xmax.min(framebuffer.origin_x() + framebuffer.width()) as i32 - 1;
+        let rt_ymin = local_viewport.ymin.max(framebuffer.origin_y()) as i32;
+        let rt_ymax = local_viewport.ymax.min(framebuffer.origin_y() + framebuffer.height()) as i32 - 1;
 
         for i in 0..triangles_num {
             let v0 = &vertices[i * 3 + 0];
@@ -230,8 +326,6 @@ impl Rasterizer {
             if area_x_2 < 1.0 {
                 continue; // TODO: treat degenerate triangles separately
             }
-
-            // const f32 det012 = det2D(v1.position - v0.position, v2.position - v0.position);
 
             let is_v01_top_left = Self::is_top_left(v01);
             let is_v12_top_left = Self::is_top_left(v12);
@@ -307,24 +401,6 @@ impl Rasterizer {
             let inv_w_dx = edge0_dx * v0.position.w + edge1_dx * v1.position.w + edge2_dx * v2.position.w;
             let inv_w_dy = edge0_dy * v0.position.w + edge1_dy * v1.position.w + edge2_dy * v2.position.w;
 
-            // let color_fp = (v0.color * l0 + v1.color * l1 + v2.color * l2) * inv_inv_w;
-            // let color = RGBA::new(
-            //     (color_fp.x * 255.0).clamp(0.0, 255.0) as u8, //
-            //     (color_fp.y * 255.0).clamp(0.0, 255.0) as u8, //
-            //     (color_fp.z * 255.0).clamp(0.0, 255.0) as u8, //
-            //     (color_fp.w * 255.0).clamp(0.0, 255.0) as u8,
-            // )
-            //     .to_u32();
-
-            // let l0 = edge0 * v0.position.w;
-            // let l1 = edge1 * v1.position.w;
-            // let l2 = edge2 * v2.position.w;
-            // let wp = l0 + l1 + l2;
-
-            // let edge0_min = v12.x * v1p_min.y - v12.y * v1p_min.x + v12_bias;
-            // let edge1_min = v20.x * v2p_min.y - v20.y * v2p_min.x + v20_bias;
-            // let edge2_min = v01.x * v0p_min.y - v01.y * v0p_min.x + v01_bias;
-
             // Set up the initial values at each consequent row
             let mut edge0_row = edge0_min; // starting value of edge function v12
             let mut edge1_row = edge1_min; // starting value of edge function v20
@@ -347,10 +423,13 @@ impl Rasterizer {
 
                 for x in xmin..=xmax {
                     if edge0 >= 0.0 && edge1 >= 0.0 && edge2 >= 0.0 {
+                        let local_x = x - framebuffer.origin_x() as i32; // TODO: remove this nonsense
+                        let local_y = y - framebuffer.origin_y() as i32; // TODO: remove this nonsense
+
                         let mut discard = false;
                         if let Some(buffer) = &mut framebuffer.depth_buffer {
                             let z_u16 = (z_24x8 >> 8) as u16;
-                            let dst_z = buffer.at_mut(x as u16, y as u16);
+                            let dst_z = buffer.get(local_x as usize, local_y as usize);
                             if z_u16 < *dst_z {
                                 *dst_z = z_u16;
                             } else {
@@ -372,7 +451,7 @@ impl Rasterizer {
                             .to_u32();
 
                             if let Some(buffer) = &mut framebuffer.color_buffer {
-                                *buffer.at_mut(x as u16, y as u16) = color;
+                                *buffer.get(local_x as usize, local_y as usize) = color;
                             }
                         }
                     }
@@ -563,7 +642,7 @@ mod tests {
     }
 
     fn render_to_64x64_albedo(command: &RasterizationCommand) -> Buffer<u32> {
-        let mut color_buffer = Buffer::<u32>::new(64, 64);
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
         color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
         let mut framebuffer = Framebuffer::default();
         framebuffer.color_buffer = Some(&mut color_buffer);
@@ -573,13 +652,13 @@ mod tests {
         rasterizer.commit(&command);
         rasterizer.draw(&mut framebuffer);
 
-        color_buffer
+        color_buffer.as_flat_buffer()
     }
 
     fn render_to_64x64_depth(command: &RasterizationCommand) -> Buffer<u16> {
-        let mut color_buffer = Buffer::<u32>::new(64, 64);
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
         color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
-        let mut depth_buffer = Buffer::<u16>::new(64, 64);
+        let mut depth_buffer = TiledBuffer::<u16, 64, 64>::new(64, 64);
         depth_buffer.fill(65535);
         let mut framebuffer = Framebuffer::default();
         framebuffer.color_buffer = Some(&mut color_buffer);
@@ -590,7 +669,7 @@ mod tests {
         rasterizer.commit(&command);
         rasterizer.draw(&mut framebuffer);
 
-        depth_buffer
+        depth_buffer.as_flat_buffer()
     }
 
     #[rstest]
@@ -612,51 +691,96 @@ mod tests {
     }
 
     #[rstest]
-    #[case(Vec2::new(-1.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_0.png")]
-    #[case(Vec2::new(-0.75, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_1.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_2.png")]
-    #[case(Vec2::new(-0.25, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_3.png")]
-    #[case(Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_4.png")]
-    #[case(Vec2::new(0.25, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_5.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_6.png")]
-    #[case(Vec2::new(0.75, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_7.png")]
-    #[case(Vec2::new(1.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_top_8.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-1.0, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_0.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.75, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_1.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_2.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.25, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_3.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.0, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_4.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.25, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_5.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.5, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_6.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.75, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_7.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(1.0, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_bottom_8.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 1.0), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_0.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.75), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_1.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_2.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.25), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_3.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.0), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_4.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.25), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_5.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_6.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.75), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_7.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -1.0), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_left_8.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 1.0), "rasterizer_triangle_orientation_right_0.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.75), "rasterizer_triangle_orientation_right_1.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.5), "rasterizer_triangle_orientation_right_2.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.25), "rasterizer_triangle_orientation_right_3.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.0), "rasterizer_triangle_orientation_right_4.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.25), "rasterizer_triangle_orientation_right_5.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer_triangle_orientation_right_6.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.75), "rasterizer_triangle_orientation_right_7.png")]
-    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -1.0), "rasterizer_triangle_orientation_right_8.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_0.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.75, 0.25), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_1.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.0), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_2.png")]
-    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.75, 0.0), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_3.png")]
-    #[case(Vec2::new(0.25, 0.5), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_4.png")]
-    #[case(Vec2::new(0.25, 0.75), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_5.png")]
-    #[case(Vec2::new(0.25, 1.0), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_6.png")]
-    #[case(Vec2::new(0.5, 1.0), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_7.png")]
-    #[case(Vec2::new(0.5, 0.75), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25), "rasterizer_triangle_orientation_other_8.png")]
+    #[case(Vec2::new(-1.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_0.png")]
+    #[case(Vec2::new(-0.75, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_1.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_2.png")]
+    #[case(Vec2::new(-0.25, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_3.png")]
+    #[case(Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_4.png")]
+    #[case(Vec2::new(0.25, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_5.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_6.png")]
+    #[case(Vec2::new(0.75, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_7.png")]
+    #[case(Vec2::new(1.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_top_8.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-1.0, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_0.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.75, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_1.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_2.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.25, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_3.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.0, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_4.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.25, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_5.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.5, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_6.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(0.75, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_7.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(1.0, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_bottom_8.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 1.0), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_0.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.75), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_1.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_2.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.25), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_3.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.0), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_4.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.25), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_5.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_6.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.75), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_7.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, -1.0), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_left_8.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 1.0
+    ), "rasterizer_triangle_orientation_right_0.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.75
+    ), "rasterizer_triangle_orientation_right_1.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.5
+    ), "rasterizer_triangle_orientation_right_2.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.25
+    ), "rasterizer_triangle_orientation_right_3.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, 0.0
+    ), "rasterizer_triangle_orientation_right_4.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.25
+    ), "rasterizer_triangle_orientation_right_5.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5
+    ), "rasterizer_triangle_orientation_right_6.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.75
+    ), "rasterizer_triangle_orientation_right_7.png")]
+    #[case(Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -1.0
+    ), "rasterizer_triangle_orientation_right_8.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_0.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.75, 0.25), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_1.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.0), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_2.png")]
+    #[case(Vec2::new(0.5, 0.5), Vec2::new(-0.75, 0.0), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_3.png")]
+    #[case(Vec2::new(0.25, 0.5), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_4.png")]
+    #[case(Vec2::new(0.25, 0.75), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_5.png")]
+    #[case(Vec2::new(0.25, 1.0), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_6.png")]
+    #[case(Vec2::new(0.5, 1.0), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_7.png")]
+    #[case(Vec2::new(0.5, 0.75), Vec2::new(-0.5, 0.25), Vec2::new(-0.25, -0.25
+    ), "rasterizer_triangle_orientation_other_8.png")]
     fn triangle_orientation(#[case] v0: Vec2, #[case] v1: Vec2, #[case] v2: Vec2, #[case] filename: &str) {
         let command = RasterizationCommand {
             world_positions: &[Vec3::new(v0.x, v0.y, 0.0), Vec3::new(v1.x, v1.y, 0.0), Vec3::new(v2.x, v2.y, 0.0)],
@@ -666,26 +790,46 @@ mod tests {
     }
 
     #[rstest]
-    #[case(Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.75), Vec2::new(1.0, -1.0), "rasterizer_triangle_thin_00.png")]
-    #[case(Vec2::new(-0.75, 1.0), Vec2::new(-1.0, 1.0), Vec2::new(1.0, -1.0), "rasterizer_triangle_thin_01.png")]
-    #[case(Vec2::new(1.0, 1.0), Vec2::new(0.75, 1.0), Vec2::new(-1.0, -1.0), "rasterizer_triangle_thin_02.png")]
-    #[case(Vec2::new(1.0, 0.75), Vec2::new(1.0, 1.0), Vec2::new(-1.0, -1.0), "rasterizer_triangle_thin_03.png")]
-    #[case(Vec2::new(1.0, -0.75), Vec2::new(1.0, -1.0), Vec2::new(-1.0, 1.0), "rasterizer_triangle_thin_04.png")]
-    #[case(Vec2::new(1.0, -1.0), Vec2::new(0.75, -1.0), Vec2::new(-1.0, 1.0), "rasterizer_triangle_thin_05.png")]
-    #[case(Vec2::new(-0.75, -1.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer_triangle_thin_06.png")]
-    #[case(Vec2::new(-1.0, -1.0), Vec2::new(-1.0, -0.75), Vec2::new(1.0, 1.0), "rasterizer_triangle_thin_07.png")]
-    #[case(Vec2::new(0.25, 1.0), Vec2::new(0.0, 1.0), Vec2::new(0.0, -1.0), "rasterizer_triangle_thin_08.png")]
-    #[case(Vec2::new(0.25, 1.0), Vec2::new(-0.25, 1.0), Vec2::new(0.0, -1.0), "rasterizer_triangle_thin_09.png")]
-    #[case(Vec2::new(0.0, 1.0), Vec2::new(-0.25, 1.0), Vec2::new(0.0, -1.0), "rasterizer_triangle_thin_10.png")]
-    #[case(Vec2::new(-1.0, 0.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0), "rasterizer_triangle_thin_11.png")]
-    #[case(Vec2::new(-1.0, 0.25), Vec2::new(-1.0, -0.25), Vec2::new(1.0, 0.0), "rasterizer_triangle_thin_12.png")]
-    #[case(Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -0.25), Vec2::new(1.0, 0.0), "rasterizer_triangle_thin_13.png")]
-    #[case(Vec2::new(-0.25, -1.0), Vec2::new(0.0, -1.0), Vec2::new(0.0, 1.0), "rasterizer_triangle_thin_14.png")]
-    #[case(Vec2::new(-0.25, -1.0), Vec2::new(0.25, -1.0), Vec2::new(0.0, 1.0), "rasterizer_triangle_thin_15.png")]
-    #[case(Vec2::new(0.0, -1.0), Vec2::new(0.25, -1.0), Vec2::new(0.0, 1.0), "rasterizer_triangle_thin_16.png")]
-    #[case(Vec2::new(-1.0, 0.0), Vec2::new(1.0, -0.25), Vec2::new(1.0, 0.0), "rasterizer_triangle_thin_17.png")]
-    #[case(Vec2::new(-1.0, 0.0), Vec2::new(1.0, -0.25), Vec2::new(1.0, 0.25), "rasterizer_triangle_thin_18.png")]
-    #[case(Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(1.0, 0.25), "rasterizer_triangle_thin_19.png")]
+    #[case(Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.75), Vec2::new(1.0, -1.0
+    ), "rasterizer_triangle_thin_00.png")]
+    #[case(Vec2::new(-0.75, 1.0), Vec2::new(-1.0, 1.0), Vec2::new(1.0, -1.0
+    ), "rasterizer_triangle_thin_01.png")]
+    #[case(Vec2::new(1.0, 1.0), Vec2::new(0.75, 1.0), Vec2::new(-1.0, -1.0
+    ), "rasterizer_triangle_thin_02.png")]
+    #[case(Vec2::new(1.0, 0.75), Vec2::new(1.0, 1.0), Vec2::new(-1.0, -1.0
+    ), "rasterizer_triangle_thin_03.png")]
+    #[case(Vec2::new(1.0, -0.75), Vec2::new(1.0, -1.0), Vec2::new(-1.0, 1.0
+    ), "rasterizer_triangle_thin_04.png")]
+    #[case(Vec2::new(1.0, -1.0), Vec2::new(0.75, -1.0), Vec2::new(-1.0, 1.0
+    ), "rasterizer_triangle_thin_05.png")]
+    #[case(Vec2::new(-0.75, -1.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0
+    ), "rasterizer_triangle_thin_06.png")]
+    #[case(Vec2::new(-1.0, -1.0), Vec2::new(-1.0, -0.75), Vec2::new(1.0, 1.0
+    ), "rasterizer_triangle_thin_07.png")]
+    #[case(Vec2::new(0.25, 1.0), Vec2::new(0.0, 1.0), Vec2::new(0.0, -1.0
+    ), "rasterizer_triangle_thin_08.png")]
+    #[case(Vec2::new(0.25, 1.0), Vec2::new(-0.25, 1.0), Vec2::new(0.0, -1.0
+    ), "rasterizer_triangle_thin_09.png")]
+    #[case(Vec2::new(0.0, 1.0), Vec2::new(-0.25, 1.0), Vec2::new(0.0, -1.0
+    ), "rasterizer_triangle_thin_10.png")]
+    #[case(Vec2::new(-1.0, 0.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0
+    ), "rasterizer_triangle_thin_11.png")]
+    #[case(Vec2::new(-1.0, 0.25), Vec2::new(-1.0, -0.25), Vec2::new(1.0, 0.0
+    ), "rasterizer_triangle_thin_12.png")]
+    #[case(Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -0.25), Vec2::new(1.0, 0.0
+    ), "rasterizer_triangle_thin_13.png")]
+    #[case(Vec2::new(-0.25, -1.0), Vec2::new(0.0, -1.0), Vec2::new(0.0, 1.0
+    ), "rasterizer_triangle_thin_14.png")]
+    #[case(Vec2::new(-0.25, -1.0), Vec2::new(0.25, -1.0), Vec2::new(0.0, 1.0
+    ), "rasterizer_triangle_thin_15.png")]
+    #[case(Vec2::new(0.0, -1.0), Vec2::new(0.25, -1.0), Vec2::new(0.0, 1.0
+    ), "rasterizer_triangle_thin_16.png")]
+    #[case(Vec2::new(-1.0, 0.0), Vec2::new(1.0, -0.25), Vec2::new(1.0, 0.0
+    ), "rasterizer_triangle_thin_17.png")]
+    #[case(Vec2::new(-1.0, 0.0), Vec2::new(1.0, -0.25), Vec2::new(1.0, 0.25
+    ), "rasterizer_triangle_thin_18.png")]
+    #[case(Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(1.0, 0.25
+    ), "rasterizer_triangle_thin_19.png")]
     fn triangle_thin(#[case] v0: Vec2, #[case] v1: Vec2, #[case] v2: Vec2, #[case] filename: &str) {
         let command = RasterizationCommand {
             world_positions: &[Vec3::new(v0.x, v0.y, 0.0), Vec3::new(v1.x, v1.y, 0.0), Vec3::new(v2.x, v2.y, 0.0)],
@@ -695,58 +839,110 @@ mod tests {
     }
 
     #[rstest]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_00.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.75), "rasterizer_depth_interpolation_large_01.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.5), "rasterizer_depth_interpolation_large_02.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.25), "rasterizer_depth_interpolation_large_03.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.0), "rasterizer_depth_interpolation_large_04.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.25), "rasterizer_depth_interpolation_large_05.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.5), "rasterizer_depth_interpolation_large_06.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.75), "rasterizer_depth_interpolation_large_07.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -1.0), "rasterizer_depth_interpolation_large_08.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.75), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_09.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.5), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_10.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.25), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_11.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_12.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.25), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_13.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.5), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_14.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.75), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_15.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_16.png")]
-    #[case(Vec3::new(-1.0, 1.0, 0.75), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_17.png")]
-    #[case(Vec3::new(-1.0, 1.0, 0.5), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_18.png")]
-    #[case(Vec3::new(-1.0, 1.0, 0.25), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_19.png")]
-    #[case(Vec3::new(-1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_20.png")]
-    #[case(Vec3::new(-1.0, 1.0, -0.25), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_21.png")]
-    #[case(Vec3::new(-1.0, 1.0, -0.5), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_22.png")]
-    #[case(Vec3::new(-1.0, 1.0, -0.75), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_23.png")]
-    #[case(Vec3::new(-1.0, 1.0, -1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0), "rasterizer_depth_interpolation_large_24.png")]
-    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, -1.0), "rasterizer_depth_interpolation_large_25.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_00.png")]
-    #[case(Vec3::new(-0.75, -0.75, 0.75), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_01.png")]
-    #[case(Vec3::new(-0.75, -0.75, 0.5), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_02.png")]
-    #[case(Vec3::new(-0.75, -0.75, 0.25), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_03.png")]
-    #[case(Vec3::new(-0.75, -0.75, 0.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_04.png")]
-    #[case(Vec3::new(-0.75, -0.75, -0.25), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_05.png")]
-    #[case(Vec3::new(-0.75, -0.75, -0.5), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_06.png")]
-    #[case(Vec3::new(-0.75, -0.75, -0.75), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_07.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_08.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.75), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_09.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.5), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_10.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.25), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_11.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_12.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, -0.25), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_13.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, -0.5), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_14.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, -0.75), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_15.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, -1.0), Vec3::new(0.5, 0.75, 1.0), "rasterizer_depth_interpolation_tilted_16.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 0.75), "rasterizer_depth_interpolation_tilted_17.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 0.5), "rasterizer_depth_interpolation_tilted_18.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 0.25), "rasterizer_depth_interpolation_tilted_19.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 0.0), "rasterizer_depth_interpolation_tilted_20.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, -0.25), "rasterizer_depth_interpolation_tilted_21.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, -0.5), "rasterizer_depth_interpolation_tilted_22.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, -0.75), "rasterizer_depth_interpolation_tilted_23.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, -1.0), "rasterizer_depth_interpolation_tilted_24.png")]
-    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.0), Vec3::new(0.5, 0.75, -1.0), "rasterizer_depth_interpolation_tilted_25.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_00.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.75
+    ), "rasterizer_depth_interpolation_large_01.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.5
+    ), "rasterizer_depth_interpolation_large_02.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.25
+    ), "rasterizer_depth_interpolation_large_03.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 0.0
+    ), "rasterizer_depth_interpolation_large_04.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.25
+    ), "rasterizer_depth_interpolation_large_05.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.5
+    ), "rasterizer_depth_interpolation_large_06.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -0.75
+    ), "rasterizer_depth_interpolation_large_07.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, -1.0
+    ), "rasterizer_depth_interpolation_large_08.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.75), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_09.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.5), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_10.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.25), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_11.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_12.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.25), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_13.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.5), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_14.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -0.75), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_15.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_16.png")]
+    #[case(Vec3::new(-1.0, 1.0, 0.75), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_17.png")]
+    #[case(Vec3::new(-1.0, 1.0, 0.5), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_18.png")]
+    #[case(Vec3::new(-1.0, 1.0, 0.25), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_19.png")]
+    #[case(Vec3::new(-1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_20.png")]
+    #[case(Vec3::new(-1.0, 1.0, -0.25), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_21.png")]
+    #[case(Vec3::new(-1.0, 1.0, -0.5), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_22.png")]
+    #[case(Vec3::new(-1.0, 1.0, -0.75), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_23.png")]
+    #[case(Vec3::new(-1.0, 1.0, -1.0), Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, -1.0, 1.0
+    ), "rasterizer_depth_interpolation_large_24.png")]
+    #[case(Vec3::new(-1.0, 1.0, 1.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, -1.0
+    ), "rasterizer_depth_interpolation_large_25.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_00.png")]
+    #[case(Vec3::new(-0.75, -0.75, 0.75), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_01.png")]
+    #[case(Vec3::new(-0.75, -0.75, 0.5), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_02.png")]
+    #[case(Vec3::new(-0.75, -0.75, 0.25), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_03.png")]
+    #[case(Vec3::new(-0.75, -0.75, 0.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_04.png")]
+    #[case(Vec3::new(-0.75, -0.75, -0.25), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_05.png")]
+    #[case(Vec3::new(-0.75, -0.75, -0.5), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_06.png")]
+    #[case(Vec3::new(-0.75, -0.75, -0.75), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_07.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_08.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.75), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_09.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.5), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_10.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.25), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_11.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_12.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, -0.25), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_13.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, -0.5), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_14.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, -0.75), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_15.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, -1.0), Vec3::new(0.5, 0.75, 1.0
+    ), "rasterizer_depth_interpolation_tilted_16.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 0.75
+    ), "rasterizer_depth_interpolation_tilted_17.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 0.5
+    ), "rasterizer_depth_interpolation_tilted_18.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 0.25
+    ), "rasterizer_depth_interpolation_tilted_19.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, 0.0
+    ), "rasterizer_depth_interpolation_tilted_20.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, -0.25
+    ), "rasterizer_depth_interpolation_tilted_21.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, -0.5
+    ), "rasterizer_depth_interpolation_tilted_22.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, -0.75
+    ), "rasterizer_depth_interpolation_tilted_23.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 1.0), Vec3::new(0.5, 0.75, -1.0
+    ), "rasterizer_depth_interpolation_tilted_24.png")]
+    #[case(Vec3::new(-0.75, -0.75, 1.0), Vec3::new(0.25, -0.25, 0.0), Vec3::new(0.5, 0.75, -1.0
+    ), "rasterizer_depth_interpolation_tilted_25.png")]
     fn depth_interpolation(#[case] v0: Vec3, #[case] v1: Vec3, #[case] v2: Vec3, #[case] filename: &str) {
         let command = RasterizationCommand {
             world_positions: &[v0, v1, v2],
@@ -757,13 +953,20 @@ mod tests {
     }
 
     #[rstest]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_0.png")]
-    #[case(Vec3::new(-1.75, -1.75, -3.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_1.png")]
-    #[case(Vec3::new(-3.75, -3.75, -7.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_2.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(1.75, -1.75, -3.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_3.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(3.75, -3.75, -7.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_4.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 1.75, -3.5), "rasterizer_color_interpolation_simple_5.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 3.75, -7.5), "rasterizer_color_interpolation_simple_6.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5
+    ), "rasterizer_color_interpolation_simple_0.png")]
+    #[case(Vec3::new(-1.75, -1.75, -3.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5
+    ), "rasterizer_color_interpolation_simple_1.png")]
+    #[case(Vec3::new(-3.75, -3.75, -7.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5
+    ), "rasterizer_color_interpolation_simple_2.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(1.75, -1.75, -3.5), Vec3::new(0.0, 0.75, -1.5
+    ), "rasterizer_color_interpolation_simple_3.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(3.75, -3.75, -7.5), Vec3::new(0.0, 0.75, -1.5
+    ), "rasterizer_color_interpolation_simple_4.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 1.75, -3.5
+    ), "rasterizer_color_interpolation_simple_5.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 3.75, -7.5
+    ), "rasterizer_color_interpolation_simple_6.png")]
     fn color_interpolation_simple(#[case] v0: Vec3, #[case] v1: Vec3, #[case] v2: Vec3, #[case] filename: &str) {
         let command = RasterizationCommand {
             world_positions: &[v0, v1, v2],
@@ -825,5 +1028,52 @@ mod tests {
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
+    }
+}
+
+#[cfg(test)]
+mod tests_binning {
+    use super::*;
+
+    #[test]
+    fn binning() {
+        struct BinningTC {
+            v0: Vec2,
+            v1: Vec2,
+            v2: Vec2,
+            mask: u32,
+        }
+        let test_cases = vec![
+            // 1 tile
+            BinningTC { mask: 0b0001, v0: Vec2::new(-0.9, 0.9), v1: Vec2::new(-0.9, 0.8), v2: Vec2::new(-0.8, 0.9) },
+            BinningTC { mask: 0b0010, v0: Vec2::new(0.8, 0.9), v1: Vec2::new(0.8, 0.8), v2: Vec2::new(0.9, 0.9) },
+            BinningTC { mask: 0b0100, v0: Vec2::new(-0.9, -0.8), v1: Vec2::new(-0.9, -0.9), v2: Vec2::new(-0.8, -0.8) },
+            BinningTC { mask: 0b1000, v0: Vec2::new(0.8, -0.8), v1: Vec2::new(0.8, -0.9), v2: Vec2::new(0.9, -0.8) },
+            // 2 tiles
+            BinningTC { mask: 0b0011, v0: Vec2::new(-0.9, 0.9), v1: Vec2::new(-0.9, 0.8), v2: Vec2::new(0.8, 0.9) },
+            BinningTC { mask: 0b0101, v0: Vec2::new(-0.9, 0.9), v1: Vec2::new(-0.9, -0.8), v2: Vec2::new(-0.8, 0.9) },
+            BinningTC { mask: 0b1010, v0: Vec2::new(0.8, 0.9), v1: Vec2::new(0.8, -0.8), v2: Vec2::new(0.9, 0.9) },
+            BinningTC { mask: 0b1100, v0: Vec2::new(-0.9, -0.8), v1: Vec2::new(-0.9, -0.9), v2: Vec2::new(0.8, -0.8) },
+            // 4 tiles (currently very crude)
+            BinningTC { mask: 0b1111, v0: Vec2::new(-0.9, 0.9), v1: Vec2::new(-0.9, -0.8), v2: Vec2::new(0.1, 0.9) },
+            BinningTC { mask: 0b1111, v0: Vec2::new(-2.0, 2.0), v1: Vec2::new(-2.0, -2.0), v2: Vec2::new(2.0, 2.0) },
+        ];
+        for tc in test_cases {
+            let mut rasterizer = Rasterizer::new();
+            rasterizer.setup(Viewport::new(0, 0, 120, 100));
+            rasterizer.commit(&RasterizationCommand {
+                world_positions: &[
+                    Vec3::new(tc.v0.x, tc.v0.y, 0.0),
+                    Vec3::new(tc.v1.x, tc.v1.y, 0.0),
+                    Vec3::new(tc.v2.x, tc.v2.y, 0.0),
+                ],
+                ..Default::default()
+            });
+            let mask = ((!rasterizer.tiles[0].triangles.is_empty()) as u32) << 0
+                | ((!rasterizer.tiles[1].triangles.is_empty()) as u32) << 1
+                | ((!rasterizer.tiles[2].triangles.is_empty()) as u32) << 2
+                | ((!rasterizer.tiles[3].triangles.is_empty()) as u32) << 3;
+            assert!(mask == tc.mask);
+        }
     }
 }

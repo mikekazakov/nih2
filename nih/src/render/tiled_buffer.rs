@@ -1,7 +1,7 @@
 use crate::render::Buffer;
 use bytemuck::{Pod, Zeroable};
 
-pub struct TiledBufferTile<'a, T, const W: usize, const H: usize> {
+pub struct TiledBufferTile<T, const W: usize, const H: usize> {
     /// X offset of the tile inside the buffer, in elements
     pub origin_x: u16,
 
@@ -16,12 +16,9 @@ pub struct TiledBufferTile<'a, T, const W: usize, const H: usize> {
 
     /// Pointer to the first element of the tile
     pub ptr: *const T,
-
-    /// Marker for lifetime
-    _marker: std::marker::PhantomData<&'a T>,
 }
 
-pub struct TiledBufferTileMut<'a, T, const W: usize, const H: usize> {
+pub struct TiledBufferTileMut<T, const W: usize, const H: usize> {
     /// X offset of the tile inside the buffer, in elements
     pub origin_x: u16,
 
@@ -36,22 +33,19 @@ pub struct TiledBufferTileMut<'a, T, const W: usize, const H: usize> {
 
     /// Pointer to the first element of the tile
     pub ptr: *mut T,
-
-    /// Marker for lifetime
-    _marker: std::marker::PhantomData<&'a mut T>,
 }
 
 const _: [(); 1] = [(); (size_of::<TiledBufferTile<u16, 64, 64>>() == 16) as usize];
 const _: [(); 1] = [(); (size_of::<TiledBufferTileMut<u16, 64, 64>>() == 16) as usize];
 
-impl<'a, T, const W: usize, const H: usize> TiledBufferTile<'a, T, W, H> {
+impl<T: Copy + Clone, const W: usize, const H: usize> TiledBufferTile<T, W, H> {
     pub const WIDTH: usize = W;
     pub const HEIGHT: usize = H;
     pub const STRIDE: usize = W * std::mem::size_of::<T>();
 
-    /// Returns a reference to the element at (x, y) with bounds checking.
+    /// Returns the element at (x, y) with bounds checking.
     /// Panics if (x, y) is out of the tile’s logical bounds.
-    pub fn get(&self, x: usize, y: usize) -> &'a T {
+    pub fn get(&self, x: usize, y: usize) -> T {
         if x >= self.width as usize || y >= self.height as usize {
             panic!(
                 "TiledBufferTile index out of bounds: ({}, {}) not in (0..{}, 0..{})",
@@ -60,29 +54,29 @@ impl<'a, T, const W: usize, const H: usize> TiledBufferTile<'a, T, W, H> {
         }
 
         // safe because bounds were checked
-        unsafe { &*self.ptr.add(y * W + x) }
+        unsafe { *self.ptr.add(y * W + x) }
     }
 
-    /// Returns a reference to the element at (x, y) without bounds checking.
+    /// Returns the element at (x, y) without bounds checking.
     ///
     /// # Safety
     /// Caller must ensure that (x, y) is within the bounds of the tile,
     /// i.e., 0 <= x < self.width and 0 <= y < self.height.
     /// Calling this method with out-of-bounds coordinates is undefined behavior.
-    pub fn get_unchecked(&self, x: usize, y: usize) -> &'a T {
+    pub fn get_unchecked(&self, x: usize, y: usize) -> T {
         debug_assert!(x < self.width as usize && y < self.height as usize);
-        unsafe { &*self.ptr.add(y * W + x) }
+        unsafe { *self.ptr.add(y * W + x) }
     }
 }
 
-impl<'a, T, const W: usize, const H: usize> TiledBufferTileMut<'a, T, W, H> {
+impl<T, const W: usize, const H: usize> TiledBufferTileMut<T, W, H> {
     pub const WIDTH: usize = W;
     pub const HEIGHT: usize = H;
     pub const STRIDE: usize = W * std::mem::size_of::<T>();
 
     /// Returns a mutable reference to the element at (x, y) with bounds checking.
     /// Panics if (x, y) is out of the tile’s logical bounds.
-    pub fn get(&mut self, x: usize, y: usize) -> &'a mut T {
+    pub fn get(&mut self, x: usize, y: usize) -> &mut T {
         if x >= self.width as usize || y >= self.height as usize {
             panic!(
                 "TiledBufferTile index out of bounds: ({}, {}) not in (0..{}, 0..{})",
@@ -100,31 +94,31 @@ impl<'a, T, const W: usize, const H: usize> TiledBufferTileMut<'a, T, W, H> {
     /// Caller must ensure that (x, y) is within the bounds of the tile,
     /// i.e., 0 <= x < self.width and 0 <= y < self.height.
     /// Calling this method with out-of-bounds coordinates is undefined behavior.
-    pub fn get_unchecked(&self, x: usize, y: usize) -> &'a mut T {
+    pub fn get_unchecked(&self, x: usize, y: usize) -> &mut T {
         debug_assert!(x < self.width as usize && y < self.height as usize);
         unsafe { &mut *self.ptr.add(y * W + x) }
     }
 }
 
-impl<'a, T, const W: usize, const H: usize> std::ops::Index<(usize, usize)> for TiledBufferTile<'a, T, W, H> {
-    type Output = T;
-    fn index(&self, (x, y): (usize, usize)) -> &T {
-        self.get_unchecked(x, y)
-    }
-}
+// impl<'a, T, const W: usize, const H: usize> std::ops::Index<(usize, usize)> for TiledBufferTile<'a, T, W, H> {
+//     type Output = T;
+//     fn index(&self, (x, y): (usize, usize)) -> T {
+//         self.get_unchecked(x, y)
+//     }
+// }
 
-impl<'a, T, const W: usize, const H: usize> std::ops::Index<(usize, usize)> for TiledBufferTileMut<'a, T, W, H> {
-    type Output = T;
-    fn index(&self, (x, y): (usize, usize)) -> &T {
-        self.get_unchecked(x, y)
-    }
-}
-
-impl<'a, T, const W: usize, const H: usize> std::ops::IndexMut<(usize, usize)> for TiledBufferTileMut<'a, T, W, H> {
-    fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut T {
-        self.get_unchecked(x, y)
-    }
-}
+// impl<'a, T, const W: usize, const H: usize> std::ops::Index<(usize, usize)> for TiledBufferTileMut<'a, T, W, H> {
+//     type Output = T;
+//     fn index(&self, (x, y): (usize, usize)) -> &T {
+//         self.get_unchecked(x, y)
+//     }
+// }
+//
+// impl<'a, T, const W: usize, const H: usize> std::ops::IndexMut<(usize, usize)> for TiledBufferTileMut<'a, T, W, H> {
+//     fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut T {
+//         self.get_unchecked(x, y)
+//     }
+// }
 
 // pub struct TiledBufferTile<'a, T, const W: usize, const H: usize> {
 //     /// X offset of the tile inside the buffer, in elements
@@ -164,6 +158,9 @@ pub struct TiledBuffer<T, const W: usize, const H: usize> {
 }
 
 impl<T: Copy + Zeroable + Pod + Default, const W: usize, const H: usize> TiledBuffer<T, W, H> {
+    pub const TILE_WIDTH: usize = W;
+    pub const TILE_HEIGHT: usize = H;
+
     pub fn width(&self) -> u16 {
         self.width
     }
@@ -202,6 +199,29 @@ impl<T: Copy + Zeroable + Pod + Default, const W: usize, const H: usize> TiledBu
         }
     }
 
+    pub fn at(&self, x: u16, y: u16) -> T {
+        debug_assert!(x < self.width, "x out of bounds: {} >= {}", x, self.width);
+        debug_assert!(y < self.height, "y out of bounds: {} >= {}", y, self.height);
+        // self.elems[(y as usize) * (self.stride as usize) + (x as usize)]
+        let tile_x = x / W as u16;
+        let tile_y = y / H as u16;
+        let tile = self.tile(tile_x, tile_y); // TODO: this is super-inefficient
+        tile.get_unchecked(x as usize % W, y as usize % H)
+    }
+
+    pub fn at_mut(&mut self, x: u16, y: u16) -> &mut T {
+        debug_assert!(x < self.width, "x out of bounds: {} >= {}", x, self.width);
+        debug_assert!(y < self.height, "y out of bounds: {} >= {}", y, self.height);
+        // &mut self.elems[(y as usize) * (self.stride as usize) + (x as usize)]
+        let tile_x = x / W as u16;
+        let tile_y = y / H as u16;
+        let start_index = (tile_y as usize * self.tiles_x as usize + tile_x as usize) * (W * H);
+        let offset = (y as usize % H) * W + (x as usize % W);
+        &mut self.values[start_index + offset]
+        // let tile = self.tile_mut(tile_x, tile_y); // TODO: this is super-inefficient
+        // tile.get_unchecked(x as usize % W, y as usize % H)
+    }
+
     pub fn tile(&self, tile_x: u16, tile_y: u16) -> TiledBufferTile<T, W, H> {
         assert!(tile_x < self.tiles_x && tile_y < self.tiles_y);
         let start_index = (tile_y as usize * self.tiles_x as usize + tile_x as usize) * (W * H);
@@ -212,7 +232,7 @@ impl<T: Copy + Zeroable + Pod + Default, const W: usize, const H: usize> TiledBu
                 width: (self.width - tile_x * W as u16).min(W as u16),
                 height: (self.height - tile_y * H as u16).min(H as u16),
                 ptr: self.values.as_ptr().add(start_index),
-                _marker: std::marker::PhantomData,
+                // _marker: std::marker::PhantomData,
             }
         }
     }
@@ -227,9 +247,19 @@ impl<T: Copy + Zeroable + Pod + Default, const W: usize, const H: usize> TiledBu
                 width: (self.width - tile_x * W as u16).min(W as u16),
                 height: (self.height - tile_y * H as u16).min(H as u16),
                 ptr: self.values.as_mut_ptr().add(start_index),
-                _marker: std::marker::PhantomData,
+                // _marker: std::marker::PhantomData,
             }
         }
+    }
+
+    pub fn as_flat_buffer(&self) -> Buffer<T> {
+        let mut buffer = Buffer::<T>::new(self.width, self.height);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                *buffer.at_mut(x, y) = self.at(x, y);
+            }
+        }
+        buffer
     }
 }
 
@@ -259,10 +289,10 @@ mod tests {
         assert_eq!(tile00.width, 4);
         assert_eq!(tile00.height, 4);
         // Check a few values
-        assert_eq!(*tile00.get(0, 0), 0);
-        assert_eq!(*tile00.get(3, 0), 3);
-        assert_eq!(*tile00.get(0, 3), 12);
-        assert_eq!(*tile00.get(3, 3), 15);
+        assert_eq!(tile00.get(0, 0), 0);
+        assert_eq!(tile00.get(3, 0), 3);
+        assert_eq!(tile00.get(0, 3), 12);
+        assert_eq!(tile00.get(3, 3), 15);
 
         // Tile (1, 0)
         let tile10 = buf.tile(1, 0);
@@ -270,10 +300,10 @@ mod tests {
         assert_eq!(tile10.origin_y, 0);
         assert_eq!(tile10.width, 2);
         assert_eq!(tile10.height, 4);
-        assert_eq!(*tile10.get(0, 0), 16);
-        assert_eq!(*tile10.get(1, 0), 17);
-        assert_eq!(*tile10.get(0, 3), 28);
-        assert_eq!(*tile10.get(1, 3), 29);
+        assert_eq!(tile10.get(0, 0), 16);
+        assert_eq!(tile10.get(1, 0), 17);
+        assert_eq!(tile10.get(0, 3), 28);
+        assert_eq!(tile10.get(1, 3), 29);
 
         // Tile (0, 1)
         let tile01 = buf.tile(0, 1);
@@ -281,10 +311,10 @@ mod tests {
         assert_eq!(tile01.origin_y, 4);
         assert_eq!(tile01.width, 4);
         assert_eq!(tile01.height, 2);
-        assert_eq!(*tile01.get(0, 0), 32);
-        assert_eq!(*tile01.get(3, 0), 35);
-        assert_eq!(*tile01.get(0, 1), 36);
-        assert_eq!(*tile01.get(3, 1), 39);
+        assert_eq!(tile01.get(0, 0), 32);
+        assert_eq!(tile01.get(3, 0), 35);
+        assert_eq!(tile01.get(0, 1), 36);
+        assert_eq!(tile01.get(3, 1), 39);
     }
 
     #[test]

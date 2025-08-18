@@ -25,8 +25,8 @@ enum DisplayMode {
 }
 
 struct State {
-    color_buffer: Buffer<u32>,
-    depth_buffer: Buffer<u16>,
+    color_buffer: TiledBuffer<u32, 64, 64>,
+    depth_buffer: TiledBuffer<u16, 64, 64>,
     mesh: MeshData,
     tick: i32,
     display_mode: DisplayMode,
@@ -40,8 +40,8 @@ struct State {
 impl Default for State {
     fn default() -> Self {
         State {
-            color_buffer: Buffer::<u32>::new(1, 1),
-            depth_buffer: Buffer::<u16>::new(1, 1),
+            color_buffer: TiledBuffer::<u32, 64, 64>::new(1, 1),
+            depth_buffer: TiledBuffer::<u16, 64, 64>::new(1, 1),
             mesh: MeshData::default(),
             tick: 0,
             display_mode: DisplayMode::Color,
@@ -123,8 +123,7 @@ fn render(state: &mut State) {
     state.color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
     state.depth_buffer.fill(u16::MAX);
 
-    let viewport =
-        Viewport { xmin: 0, ymin: 0, xmax: state.color_buffer.width as u16, ymax: state.color_buffer.height as u16 };
+    let viewport = Viewport { xmin: 0, ymin: 0, xmax: state.color_buffer.width(), ymax: state.color_buffer.height() };
     // let lines = vec![
     //     Vec3::new(0.0, 0.0, 0.0),
     //     Vec3::new(0.5, 0.0, 0.0), //
@@ -275,8 +274,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // buf.fill(RGBA::new(0, 0, 0, 255));
     let mut state = State::default();
 
-    state.color_buffer = Buffer::<u32>::new(window.size().0 as u16, window.size().1 as u16);
-    state.depth_buffer = Buffer::<u16>::new(window.size().0 as u16, window.size().1 as u16);
+    state.color_buffer = TiledBuffer::<u32, 64, 64>::new(window.size().0 as u16, window.size().1 as u16);
+    state.depth_buffer = TiledBuffer::<u16, 64, 64>::new(window.size().0 as u16, window.size().1 as u16);
     state.mesh = mesh;
 
     // let (models, materials) =
@@ -338,10 +337,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        // let flat_buffer =
+
         if state.display_mode == DisplayMode::Color {
-            blit_to_window(&mut state.color_buffer, &window, &event_pump);
+            blit_to_window(&mut state.color_buffer.as_flat_buffer(), &window, &event_pump);
         } else if state.display_mode == DisplayMode::Depth {
-            blit_depth_to_window(&state.depth_buffer, &window, &event_pump);
+            blit_depth_to_window(&state.depth_buffer.as_flat_buffer(), &window, &event_pump);
         }
     }
 
