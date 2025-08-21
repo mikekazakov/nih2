@@ -254,12 +254,56 @@ impl<T: Copy + Zeroable + Pod + Default, const W: usize, const H: usize> TiledBu
 
     pub fn as_flat_buffer(&self) -> Buffer<T> {
         let mut buffer = Buffer::<T>::new(self.width, self.height);
-        for y in 0..self.height {
-            for x in 0..self.width {
-                *buffer.at_mut(x, y) = self.at(x, y);
+
+        // Fast path: write row chunks directly into the flat buffer.
+        // Assumes Buffer<T> exposes a contiguous mutable slice.
+        let dst = buffer.as_mut_slice();
+
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let tiles_x = self.tiles_x as usize;
+        let tiles_y = self.tiles_y as usize;
+
+        for ty in 0..tiles_y {
+            // Number of logical rows present in this tile row (handles bottom edge)
+            let rows_in_tile_row = std::cmp::min(H, height.saturating_sub(ty * H));
+
+            for row in 0..rows_in_tile_row {
+                let y = ty * H + row; // logical y
+                let dst_row_start = y * width; // start of the destination row
+                let mut dst_col = 0; // running x inside the destination row
+
+                for tx in 0..tiles_x {
+                    // Columns present in this tile (handles right edge)
+                    let cols_in_tile = std::cmp::min(W, width.saturating_sub(tx * W));
+                    if cols_in_tile == 0 {
+                        break;
+                    }
+
+                    // Base of the (tx, ty) tile in `values`
+                    let tile_base = (ty * tiles_x + tx) * (W * H);
+                    // Start of the `row` within that tile
+                    let src_row_start = tile_base + row * W;
+
+                    let src = &self.values[src_row_start..src_row_start + cols_in_tile];
+                    let dst_start = dst_row_start + dst_col;
+                    let dst_end = dst_start + cols_in_tile;
+
+                    dst[dst_start..dst_end].copy_from_slice(src);
+                    dst_col += cols_in_tile;
+                }
             }
         }
+
         buffer
+
+        // let mut buffer = Buffer::<T>::new(self.width, self.height);
+        // for y in 0..self.height {
+        //     for x in 0..self.width {
+        //         *buffer.at_mut(x, y) = self.at(x, y);
+        //     }
+        // }
+        // buffer
     }
 }
 

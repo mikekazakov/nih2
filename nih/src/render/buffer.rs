@@ -69,6 +69,10 @@ impl<T: Copy + Zeroable + Pod> Buffer<T> {
         &mut self.elems
     }
 
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.elems
+    }
+
     pub fn fill(&mut self, with: T) {
         // let raw = color.to_u32();
         for elem in self.elems.iter_mut() {

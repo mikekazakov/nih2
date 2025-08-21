@@ -1,6 +1,6 @@
 extern crate sdl3;
 
-use std::cell::RefCell;
+use parking_lot::ReentrantMutex;
 use std::time::{Duration, Instant};
 
 use nih::math::*;
@@ -9,14 +9,16 @@ use nih::util::*;
 
 use nih::render::rgba::RGBA;
 use nih::util::profiler::Profiler;
+use once_cell::sync::Lazy;
 use sdl3::event::Event;
 use sdl3::keyboard::{Keycode, Mod};
-// use sdl3::libc::stat;
 use sdl3::pixels::PixelFormatEnum;
 use sdl3::rect::Rect;
 use sdl3::surface::Surface;
 
 mod io;
+
+static PROFILER: Lazy<ReentrantMutex<Profiler>> = Lazy::new(|| ReentrantMutex::new(Profiler::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DisplayMode {
@@ -28,13 +30,11 @@ struct State {
     color_buffer: TiledBuffer<u32, 64, 64>,
     depth_buffer: TiledBuffer<u16, 64, 64>,
     mesh: MeshData,
-    tick: i32,
     display_mode: DisplayMode,
     timestamp: Instant,
     t: Duration,
     dt: Duration,
     last_printout: Instant,
-    profiler: RefCell<Profiler>,
 }
 
 impl Default for State {
@@ -43,13 +43,11 @@ impl Default for State {
             color_buffer: TiledBuffer::<u32, 64, 64>::new(1, 1),
             depth_buffer: TiledBuffer::<u16, 64, 64>::new(1, 1),
             mesh: MeshData::default(),
-            tick: 0,
             display_mode: DisplayMode::Color,
             timestamp: Instant::now(),
             t: Duration::from_secs(0),
             dt: Duration::from_secs(0),
             last_printout: Instant::now(),
-            profiler: RefCell::new(Profiler::new()),
         }
     }
 }
@@ -70,7 +68,6 @@ fn blit_to_window(buffer: &mut Buffer<u32>, window: &sdl3::video::Window, event_
 }
 
 fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
-    // find max value apart from 65535
     let mut max = 0;
     let mut min = 65535;
     buffer.elems.iter().for_each(|&x| {
@@ -117,8 +114,8 @@ fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, even
 }
 
 fn render(state: &mut State) {
+    let profiler = PROFILER.lock();
     // buf.fill(RGBA::new((tick % 256) as u8, 255, 0, 255));
-    let tick = state.tick;
 
     state.color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
     state.depth_buffer.fill(u16::MAX);
@@ -133,45 +130,45 @@ fn render(state: &mut State) {
     //     Vec3::new(-1.0, -1.0, 0.0),
     // ];
 
-    if false {
-        let mut mesh_lines = Vec::<nih::math::Vec3>::default();
-        let num = state.mesh.positions.len() / 3;
-        // let num = 1;
-        for i in 0..num {
-            mesh_lines.push(state.mesh.positions[i * 3 + 0]);
-            mesh_lines.push(state.mesh.positions[i * 3 + 1]);
-            mesh_lines.push(state.mesh.positions[i * 3 + 1]);
-            mesh_lines.push(state.mesh.positions[i * 3 + 2]);
-            mesh_lines.push(state.mesh.positions[i * 3 + 2]);
-            mesh_lines.push(state.mesh.positions[i * 3 + 0]);
-        }
-
-        // let lines = nih::math::sphere_to_aa_lines(32);
-
-        let mut cmd = DrawLinesCommand::default();
-        // cmd.lines = &lines;
-        // // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
-        // cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
-        // cmd.model = Mat34::rotate_yz(tick as f32 / 377.0)
-        //     * Mat34::rotate_xy(tick as f32 / 177.0)
-        //     * Mat34::rotate_zx(tick as f32 / 100.0)
-        //     * Mat34::scale_uniform(0.5);
-
-        cmd.lines = &mesh_lines;
-        // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
-        cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
-        cmd.model = Mat34::rotate_zx(tick as f32 / 100.0)
-            * Mat34::translate(Vec3::new(0.0, 0.0, 0.0))
-            * Mat34::scale_uniform(0.5);
-
-        let mut framebuffer = Framebuffer::default();
-        framebuffer.color_buffer = Some(&mut state.color_buffer);
-        draw_lines(&mut framebuffer, &viewport, &cmd);
-
-        let aabb_lines = aabb_to_lines(state.mesh.aabb);
-        cmd.lines = &aabb_lines;
-        draw_lines(&mut framebuffer, &viewport, &cmd);
-    }
+    // if false {
+    //     let mut mesh_lines = Vec::<nih::math::Vec3>::default();
+    //     let num = state.mesh.positions.len() / 3;
+    //     // let num = 1;
+    //     for i in 0..num {
+    //         mesh_lines.push(state.mesh.positions[i * 3 + 0]);
+    //         mesh_lines.push(state.mesh.positions[i * 3 + 1]);
+    //         mesh_lines.push(state.mesh.positions[i * 3 + 1]);
+    //         mesh_lines.push(state.mesh.positions[i * 3 + 2]);
+    //         mesh_lines.push(state.mesh.positions[i * 3 + 2]);
+    //         mesh_lines.push(state.mesh.positions[i * 3 + 0]);
+    //     }
+    //
+    //     // let lines = nih::math::sphere_to_aa_lines(32);
+    //
+    //     let mut cmd = DrawLinesCommand::default();
+    //     // cmd.lines = &lines;
+    //     // // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
+    //     // cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
+    //     // cmd.model = Mat34::rotate_yz(tick as f32 / 377.0)
+    //     //     * Mat34::rotate_xy(tick as f32 / 177.0)
+    //     //     * Mat34::rotate_zx(tick as f32 / 100.0)
+    //     //     * Mat34::scale_uniform(0.5);
+    //
+    //     cmd.lines = &mesh_lines;
+    //     // cmd.color = Vec4::new(1.0, 1.0, 0.0, 1.0);
+    //     cmd.color = Vec4::new(1.0, 1.0, 0.0, 0.6);
+    //     cmd.model = Mat34::rotate_zx(tick as f32 / 100.0)
+    //         * Mat34::translate(Vec3::new(0.0, 0.0, 0.0))
+    //         * Mat34::scale_uniform(0.5);
+    //
+    //     let mut framebuffer = Framebuffer::default();
+    //     framebuffer.color_buffer = Some(&mut state.color_buffer);
+    //     draw_lines(&mut framebuffer, &viewport, &cmd);
+    //
+    //     let aabb_lines = aabb_to_lines(state.mesh.aabb);
+    //     cmd.lines = &aabb_lines;
+    //     draw_lines(&mut framebuffer, &viewport, &cmd);
+    // }
 
     {
         // pub struct RasterizationCommand<'a> {
@@ -236,7 +233,7 @@ fn render(state: &mut State) {
         // };
 
         {
-            let _profile_commit_scope = profiler::ProfileScope::new("commit", &state.profiler);
+            let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
             rasterizer.commit(&cmd);
         }
 
@@ -251,7 +248,7 @@ fn render(state: &mut State) {
         framebuffer.color_buffer = Some(&mut state.color_buffer);
         framebuffer.depth_buffer = Some(&mut state.depth_buffer);
         {
-            let _profile_draw_scope = profiler::ProfileScope::new("draw", &state.profiler);
+            let _profile_draw_scope = profiler::ProfileScope::new("draw", &profiler);
             rasterizer.draw(&mut framebuffer);
         }
     }
@@ -262,7 +259,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let video_subsystem = sdl_context.video()?;
 
     let mut window = video_subsystem
-        .window("rust-sdl3 demo: Window", 600, 600)
+        .window("rust-sdl3 demo: Window", 1280, 720)
         .resizable()
         .build()
         .map_err(|e| e.to_string())?;
@@ -273,9 +270,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let mut buf = ;
     // buf.fill(RGBA::new(0, 0, 0, 255));
     let mut state = State::default();
-
-    state.color_buffer = TiledBuffer::<u32, 64, 64>::new(window.size().0 as u16, window.size().1 as u16);
-    state.depth_buffer = TiledBuffer::<u16, 64, 64>::new(window.size().0 as u16, window.size().1 as u16);
     state.mesh = mesh;
 
     // let (models, materials) =
@@ -299,6 +293,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_pump = sdl_context.event_pump().map_err(|e| e.to_string())?;
 
     'running: loop {
+        let profiler = PROFILER.lock();
+        let _root_profile_scope = profiler::ProfileScope::new("frame", &profiler);
+
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
@@ -316,16 +313,20 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             let position = window.position();
             let size = window.size();
             let title = format!(
-                "Window - pos({}x{}), size({}x{}): {:.3}ms",
-                position.0,
-                position.1,
+                "({}x{})px, {} tiles, {:.1}ms",
                 size.0,
                 size.1,
+                state.color_buffer.tiles_x() * state.color_buffer.tiles_y(),
                 state.dt.as_secs_f32() * 1000.0
             );
             window.set_title(&title).map_err(|e| e.to_string())?;
 
-            state.tick += 1;
+            // Update the framebuffer size if required
+            if state.color_buffer.width() != size.0 as u16 || state.color_buffer.height() != size.1 as u16 {
+                state.color_buffer = TiledBuffer::<u32, 64, 64>::new(size.0 as u16, size.1 as u16);
+                state.depth_buffer = TiledBuffer::<u16, 64, 64>::new(size.0 as u16, size.1 as u16);
+            }
+
             state.dt = state.timestamp.elapsed();
             state.t += state.dt;
             state.timestamp = Instant::now();
@@ -333,16 +334,18 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if (state.timestamp - state.last_printout).as_secs() > 2 {
                 state.last_printout = state.timestamp;
-                state.profiler.borrow().print();
+                profiler.print();
             }
         }
 
-        // let flat_buffer =
-
-        if state.display_mode == DisplayMode::Color {
-            blit_to_window(&mut state.color_buffer.as_flat_buffer(), &window, &event_pump);
-        } else if state.display_mode == DisplayMode::Depth {
-            blit_depth_to_window(&state.depth_buffer.as_flat_buffer(), &window, &event_pump);
+        {
+            let _blit_profile_scope = profiler::ProfileScope::new("blit to window", &profiler);
+            // TODO: this is stupid
+            if state.display_mode == DisplayMode::Color {
+                blit_to_window(&mut state.color_buffer.as_flat_buffer(), &window, &event_pump);
+            } else if state.display_mode == DisplayMode::Depth {
+                blit_depth_to_window(&state.depth_buffer.as_flat_buffer(), &window, &event_pump);
+            }
         }
     }
 
