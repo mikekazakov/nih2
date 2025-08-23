@@ -683,14 +683,14 @@ mod tests {
     }
 
     #[rstest]
-    #[case(Vec4::new(0.0, 0.0, 0.0, 1.0), "rasterizer_triangle_simple_black.png")]
-    #[case(Vec4::new(1.0, 1.0, 1.0, 1.0), "rasterizer_triangle_simple_white.png")]
-    #[case(Vec4::new(1.0, 0.0, 0.0, 1.0), "rasterizer_triangle_simple_red.png")]
-    #[case(Vec4::new(0.0, 1.0, 0.0, 1.0), "rasterizer_triangle_simple_green.png")]
-    #[case(Vec4::new(0.0, 0.0, 1.0, 1.0), "rasterizer_triangle_simple_blue.png")]
-    #[case(Vec4::new(1.0, 1.0, 0.0, 1.0), "rasterizer_triangle_simple_yellow.png")]
-    #[case(Vec4::new(1.0, 0.0, 1.0, 1.0), "rasterizer_triangle_simple_purple.png")]
-    #[case(Vec4::new(0.0, 1.0, 1.0, 1.0), "rasterizer_triangle_simple_cyan.png")]
+    #[case(Vec4::new(0.0, 0.0, 0.0, 1.0), "rasterizer/triangle/simple/black.png")]
+    #[case(Vec4::new(1.0, 1.0, 1.0, 1.0), "rasterizer/triangle/simple/white.png")]
+    #[case(Vec4::new(1.0, 0.0, 0.0, 1.0), "rasterizer/triangle/simple/red.png")]
+    #[case(Vec4::new(0.0, 1.0, 0.0, 1.0), "rasterizer/triangle/simple/green.png")]
+    #[case(Vec4::new(0.0, 0.0, 1.0, 1.0), "rasterizer/triangle/simple/blue.png")]
+    #[case(Vec4::new(1.0, 1.0, 0.0, 1.0), "rasterizer/triangle/simple/yellow.png")]
+    #[case(Vec4::new(1.0, 0.0, 1.0, 1.0), "rasterizer/triangle/simple/purple.png")]
+    #[case(Vec4::new(0.0, 1.0, 1.0, 1.0), "rasterizer/triangle/simple/cyan.png")]
     fn triangle_simple(#[case] color: Vec4, #[case] filename: &str) {
         let command = RasterizationCommand {
             world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
