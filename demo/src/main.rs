@@ -1,6 +1,7 @@
 extern crate sdl3;
 
 use parking_lot::ReentrantMutex;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use nih::math::*;
@@ -267,31 +268,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    // let mesh = load_obj("/Users/migun/Documents/gfx/Obj/lamp2.obj");
-    let mesh = io::load_obj("/Users/migun/Documents/gfx/Obj2/Lamp2.obj");
-
-    // let mut buf = ;
-    // buf.fill(RGBA::new(0, 0, 0, 255));
     let mut state = State::default();
-    state.mesh = mesh;
-
-    // let (models, materials) =
-    //     tobj::load_obj("/Users/migun/Documents/gfx/Obj/teapot-2.obj", &tobj::LoadOptions::default())
-    //         .expect("Failed to OBJ load file");
-
-    // let aa = std::fs::read_to_string("/Users/migun/Documents/gfx/Obj/lamp2.obj")?;
-
-    // // let input = BufReader::new(File::open("/Users/migun/Documents/gfx/Obj/teapot-2.obj").unwrap());
-    // let input = BufReader::new(File::open("/Users/migun/Documents/gfx/Obj/lamp2.obj").unwrap());
-    // // input.re
-    // let model: Obj = load_obj(input).unwrap();
-    // // let model: Obj = load_obj(aa).unwrap();
-
-    // let model = wavefront_obj::obj::parse(aa)?;
-
-    //model.objects[0].
-    //
-    //
+    state.mesh = io::load_obj(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Lamp2.obj"));
 
     let mut event_pump = sdl_context.event_pump().map_err(|e| e.to_string())?;
 
