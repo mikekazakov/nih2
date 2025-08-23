@@ -846,13 +846,13 @@ mod tests {
     }
 
     #[rstest]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_0.png")]
-    #[case(Vec3::new(-1.75, -1.75, -3.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_1.png")]
-    #[case(Vec3::new(-3.75, -3.75, -7.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_2.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(1.75, -1.75, -3.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_3.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(3.75, -3.75, -7.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer_color_interpolation_simple_4.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 1.75, -3.5), "rasterizer_color_interpolation_simple_5.png")]
-    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 3.75, -7.5), "rasterizer_color_interpolation_simple_6.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer/interpolation/color/simple_0.png")]
+    #[case(Vec3::new(-1.75, -1.75, -3.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer/interpolation/color/simple_1.png")]
+    #[case(Vec3::new(-3.75, -3.75, -7.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer/interpolation/color/simple_2.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(1.75, -1.75, -3.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer/interpolation/color/simple_3.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(3.75, -3.75, -7.5), Vec3::new(0.0, 0.75, -1.5), "rasterizer/interpolation/color/simple_4.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 1.75, -3.5), "rasterizer/interpolation/color/simple_5.png")]
+    #[case(Vec3::new(-0.75, -0.75, -1.5), Vec3::new(0.75, -0.75, -1.5), Vec3::new(0.0, 3.75, -7.5), "rasterizer/interpolation/color/simple_6.png")]
     fn color_interpolation_simple(#[case] v0: Vec3, #[case] v1: Vec3, #[case] v2: Vec3, #[case] filename: &str) {
         let command = RasterizationCommand {
             world_positions: &[v0, v1, v2],
@@ -868,43 +868,43 @@ mod tests {
         Vec4::new(1.0, 0.5, 0.0, 1.0),
         Vec4::new(0.0, 1.0, 0.0, 1.0),
         Vec4::new(0.0, 0.0, 1.0, 1.0),
-        "rasterizer_color_interpolation_mix_0.png"
+        "rasterizer/interpolation/color/mix_0.png"
     )]
     #[case(
         Vec4::new(1.0, 0.0, 0.0, 1.0),
         Vec4::new(0.0, 1.0, 0.5, 1.0),
         Vec4::new(0.0, 0.0, 1.0, 1.0),
-        "rasterizer_color_interpolation_mix_1.png"
+        "rasterizer/interpolation/color/mix_1.png"
     )]
     #[case(
         Vec4::new(1.0, 0.0, 0.0, 1.0),
         Vec4::new(0.0, 1.0, 0.0, 1.0),
         Vec4::new(0.5, 0.0, 1.0, 1.0),
-        "rasterizer_color_interpolation_mix_2.png"
+        "rasterizer/interpolation/color/mix_2.png"
     )]
     #[case(
         Vec4::new(1.0, 0.2, 0.1, 1.0),
         Vec4::new(0.0, 1.0, 0.0, 1.0),
         Vec4::new(0.0, 0.0, 1.0, 1.0),
-        "rasterizer_color_interpolation_mix_3.png"
+        "rasterizer/interpolation/color/mix_3.png"
     )]
     #[case(
         Vec4::new(1.0, 0.0, 0.0, 1.0),
         Vec4::new(0.2, 1.0, 0.1, 1.0),
         Vec4::new(0.0, 0.0, 1.0, 1.0),
-        "rasterizer_color_interpolation_mix_4.png"
+        "rasterizer/interpolation/color/mix_4.png"
     )]
     #[case(
         Vec4::new(1.0, 0.0, 0.0, 1.0),
         Vec4::new(0.0, 1.0, 0.0, 1.0),
         Vec4::new(0.2, 0.1, 1.0, 1.0),
-        "rasterizer_color_interpolation_mix_5.png"
+        "rasterizer/interpolation/color/mix_5.png"
     )]
     #[case(
         Vec4::new(1.0, 0.2, 0.1, 1.0),
         Vec4::new(0.2, 1.0, 0.1, 1.0),
         Vec4::new(0.2, 0.1, 1.0, 1.0),
-        "rasterizer_color_interpolation_mix_6.png"
+        "rasterizer/interpolation/color/mix_6.png"
     )]
     fn color_interpolation_mix(#[case] c0: Vec4, #[case] c1: Vec4, #[case] c2: Vec4, #[case] filename: &str) {
         let command = RasterizationCommand {
