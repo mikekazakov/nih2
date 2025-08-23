@@ -1,6 +1,7 @@
 use super::super::math::*;
 use super::*;
 use arrayvec::ArrayVec;
+use std::cmp::{max, min};
 // use arrayvec::ArrayVec;
 // use std::mem::swap;
 
@@ -301,35 +302,38 @@ impl Rasterizer {
     }
 
     fn draw_triangles(&self, framebuffer: &mut FramebufferTile, local_viewport: Viewport, vertices: &[Vertex]) {
+        assert!(local_viewport.xmin >= framebuffer.origin_x());
+        assert!(local_viewport.xmax >= framebuffer.origin_x());
+        assert!(local_viewport.ymin >= framebuffer.origin_y());
+        assert!(local_viewport.ymax >= framebuffer.origin_y());
         let triangles_num = vertices.len() / 3;
         if triangles_num == 0 {
             return;
         }
 
-        // let rt_xmin = self.viewport.xmin.max(0) as i32;
-        // let rt_xmax = self.viewport.xmax.min(framebuffer.width()) as i32 - 1;
-        // let rt_ymin = self.viewport.ymin.max(0) as i32;
-        // let rt_ymax = self.viewport.ymax.min(framebuffer.height()) as i32 - 1;
+        let tile_origin = Vec2::new(framebuffer.origin_x() as f32, framebuffer.origin_y() as f32);
 
-        // const i32 rt_xmin = std::max<i32>(viewport.xmin, 0);
-        // const i32 rt_xmax = std::min<i32>(viewport.xmax, framebuffer.width()) - 1;
-        // const i32 rt_ymin = std::max<i32>(viewport.ymin, 0);
-        // const i32 rt_ymax = std::min<i32>(viewport.ymax, framebuffer.height()) - 1;
-
-        let rt_xmin = local_viewport.xmin.max(framebuffer.origin_x()) as i32;
-        let rt_xmax = local_viewport.xmax.min(framebuffer.origin_x() + framebuffer.width()) as i32 - 1;
-        let rt_ymin = local_viewport.ymin.max(framebuffer.origin_y()) as i32;
-        let rt_ymax = local_viewport.ymax.min(framebuffer.origin_y() + framebuffer.height()) as i32 - 1;
+        let rt_xmin = (max(local_viewport.xmin, framebuffer.origin_x()) - framebuffer.origin_x()) as i32;
+        let rt_xmax = (min(local_viewport.xmax, framebuffer.origin_x() + framebuffer.width())
+            - framebuffer.origin_x()
+            - 1) as i32;
+        let rt_ymin = (max(local_viewport.ymin, framebuffer.origin_y()) - framebuffer.origin_y()) as i32;
+        let rt_ymax = (min(local_viewport.ymax, framebuffer.origin_y() + framebuffer.height())
+            - framebuffer.origin_y()
+            - 1) as i32;
 
         for i in 0..triangles_num {
             let v0 = &vertices[i * 3 + 0];
             let v1 = &vertices[i * 3 + 1];
             let v2 = &vertices[i * 3 + 2];
+            let v0_xy = v0.position.xy() - tile_origin;
+            let v1_xy = v1.position.xy() - tile_origin;
+            let v2_xy = v2.position.xy() - tile_origin;
 
-            let v01 = (v1.position - v0.position).xy();
-            let v12 = (v2.position - v1.position).xy();
-            let v20 = (v0.position - v2.position).xy();
-            let v02 = (v2.position - v0.position).xy();
+            let v01 = v1_xy - v0_xy;
+            let v12 = v2_xy - v1_xy;
+            let v20 = v0_xy - v2_xy;
+            let v02 = v2_xy - v0_xy;
 
             let area_x_2 = v01.x * v02.y - v01.y * v02.x;
 
@@ -344,15 +348,15 @@ impl Rasterizer {
             let v12_bias = if is_v12_top_left { 0.0 } else { -0.001 };
             let v20_bias = if is_v20_top_left { 0.0 } else { -0.001 };
 
-            let xmin = rt_xmin.max(v0.position.x.min(v1.position.x).min(v2.position.x) as i32);
-            let xmax = rt_xmax.min(v0.position.x.max(v1.position.x).max(v2.position.x) as i32);
-            let ymin = rt_ymin.max(v0.position.y.min(v1.position.y).min(v2.position.y) as i32);
-            let ymax = rt_ymax.min(v0.position.y.max(v1.position.y).max(v2.position.y) as i32);
+            let xmin = rt_xmin.max(v0_xy.x.min(v1_xy.x).min(v2_xy.x) as i32);
+            let xmax = rt_xmax.min(v0_xy.x.max(v1_xy.x).max(v2_xy.x) as i32);
+            let ymin = rt_ymin.max(v0_xy.y.min(v1_xy.y).min(v2_xy.y) as i32);
+            let ymax = rt_ymax.min(v0_xy.y.max(v1_xy.y).max(v2_xy.y) as i32);
 
             let p_min = Vec2::new(xmin as f32 + 0.5, ymin as f32 + 0.5);
-            let v0p_min = p_min - v0.position.xy();
-            let v1p_min = p_min - v1.position.xy();
-            let v2p_min = p_min - v2.position.xy();
+            let v0p_min = p_min - v0_xy;
+            let v1p_min = p_min - v1_xy;
+            let v2p_min = p_min - v2_xy;
 
             // Precompute edge functions start values and increments
             let edge0_min = v12.x * v1p_min.y - v12.y * v1p_min.x + v12_bias;
@@ -433,13 +437,10 @@ impl Rasterizer {
 
                 for x in xmin..=xmax {
                     if edge0 >= 0.0 && edge1 >= 0.0 && edge2 >= 0.0 {
-                        let local_x = x - framebuffer.origin_x() as i32; // TODO: remove this nonsense
-                        let local_y = y - framebuffer.origin_y() as i32; // TODO: remove this nonsense
-
                         let mut discard = false;
                         if let Some(buffer) = &mut framebuffer.depth_buffer {
                             let z_u16 = (z_24x8 >> 8) as u16;
-                            let dst_z = buffer.get(local_x as usize, local_y as usize);
+                            let dst_z = buffer.get(x as usize, y as usize);
                             if z_u16 < *dst_z {
                                 *dst_z = z_u16;
                             } else {
@@ -461,7 +462,7 @@ impl Rasterizer {
                             .to_u32();
 
                             if let Some(buffer) = &mut framebuffer.color_buffer {
-                                *buffer.get(local_x as usize, local_y as usize) = color;
+                                *buffer.get(x as usize, y as usize) = color;
                             }
                         }
                     }
