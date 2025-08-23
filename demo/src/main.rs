@@ -31,6 +31,7 @@ struct State {
     depth_buffer: TiledBuffer<u16, 64, 64>,
     mesh: MeshData,
     display_mode: DisplayMode,
+    overlay_tiles: bool,
     timestamp: Instant,
     t: Duration,
     dt: Duration,
@@ -44,6 +45,7 @@ impl Default for State {
             depth_buffer: TiledBuffer::<u16, 64, 64>::new(1, 1),
             mesh: MeshData::default(),
             display_mode: DisplayMode::Color,
+            overlay_tiles: false,
             timestamp: Instant::now(),
             t: Duration::from_secs(0),
             dt: Duration::from_secs(0),
@@ -92,7 +94,7 @@ fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, even
                 if depth == 65535 {
                     // 255u8
                     pixels[offset + 0] = 255; // B
-                    pixels[offset + 1] = 0; // G
+                    pixels[offset + 1] = 200; // G
                     pixels[offset + 2] = 255; // R
                 } else {
                     let gray = (((depth - min) as u32 * 255) / (delta)) as u8;
@@ -117,7 +119,8 @@ fn render(state: &mut State) {
     let profiler = PROFILER.lock();
     // buf.fill(RGBA::new((tick % 256) as u8, 255, 0, 255));
 
-    state.color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+    // (64, 224, 208)
+    state.color_buffer.fill(RGBA::new(64, 224, 208, 255).to_u32());
     state.depth_buffer.fill(u16::MAX);
 
     let viewport = Viewport { xmin: 0, ymin: 0, xmax: state.color_buffer.width(), ymax: state.color_buffer.height() };
@@ -305,12 +308,14 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Event::KeyDown { keycode: Some(Keycode::_2), keymod: Mod::LGUIMOD, .. } => {
                     state.display_mode = DisplayMode::Depth;
                 }
+                Event::KeyDown { keycode: Some(Keycode::_3), keymod: Mod::LGUIMOD, .. } => {
+                    state.overlay_tiles = !state.overlay_tiles;
+                }
                 _ => {}
             }
         }
 
         {
-            let position = window.position();
             let size = window.size();
             let title = format!(
                 "({}x{})px, {} tiles, {:.1}ms",
@@ -342,7 +347,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _blit_profile_scope = profiler::ProfileScope::new("blit to window", &profiler);
             // TODO: this is stupid
             if state.display_mode == DisplayMode::Color {
-                blit_to_window(&mut state.color_buffer.as_flat_buffer(), &window, &event_pump);
+                let mut flat = state.color_buffer.as_flat_buffer();
+                if state.overlay_tiles {
+                    overlay_tiles(&mut flat);
+                }
+                blit_to_window(&mut flat, &window, &event_pump);
             } else if state.display_mode == DisplayMode::Depth {
                 blit_depth_to_window(&state.depth_buffer.as_flat_buffer(), &window, &event_pump);
             }
@@ -350,4 +359,18 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn overlay_tiles(buffer: &mut Buffer<u32>) {
+    for y in 0..buffer.height {
+        for x in 0..buffer.width {
+            if (x % 128 <= 64 && y % 128 <= 64) || (x % 128 > 64 && y % 128 > 64) {
+                let mut c = RGBA::from_u32(buffer.at(x, y));
+                c.r = ((c.r as u16) * 7 / 8) as u8;
+                c.g = ((c.g as u16) * 7 / 8) as u8;
+                c.b = ((c.b as u16) * 7 / 8) as u8;
+                *buffer.at_mut(x, y) = c.to_u32();
+            }
+        }
+    }
 }
