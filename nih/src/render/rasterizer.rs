@@ -915,6 +915,32 @@ mod tests {
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
     }
+
+    #[rstest]
+    #[case(Viewport::new(0, 0, 64, 64), "rasterizer/viewport/0.png")]
+    #[case(Viewport::new(0, 0, 32, 32), "rasterizer/viewport/1.png")]
+    #[case(Viewport::new(32, 0, 64, 32), "rasterizer/viewport/2.png")]
+    #[case(Viewport::new(0, 32, 32, 64), "rasterizer/viewport/3.png")]
+    #[case(Viewport::new(32, 32, 64, 64), "rasterizer/viewport/4.png")]
+    #[case(Viewport::new(0, 0, 32, 64), "rasterizer/viewport/5.png")]
+    #[case(Viewport::new(32, 0, 64, 64), "rasterizer/viewport/6.png")]
+    #[case(Viewport::new(0, 0, 64, 32), "rasterizer/viewport/7.png")]
+    #[case(Viewport::new(0, 32, 64, 64), "rasterizer/viewport/8.png")]
+    fn viewport(#[case] v: Viewport, #[case] filename: &str) {
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
+            ..Default::default()
+        };
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
+        color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+        let mut framebuffer = Framebuffer::default();
+        framebuffer.color_buffer = Some(&mut color_buffer);
+        let mut rasterizer = Rasterizer::new();
+        rasterizer.setup(v);
+        rasterizer.commit(&command);
+        rasterizer.draw(&mut framebuffer);
+        assert_albedo_against_reference(&color_buffer.as_flat_buffer(), filename);
+    }
 }
 
 #[cfg(test)]
