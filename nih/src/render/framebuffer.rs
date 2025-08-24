@@ -17,6 +17,9 @@ impl Default for Framebuffer<'_> {
 }
 
 impl Framebuffer<'_> {
+    pub const TILE_WITH: u16 = 64;
+    pub const TILE_HEIGHT: u16 = 64;
+
     pub fn width(&self) -> u16 {
         if let Some(buffer) = &self.color_buffer {
             return buffer.width();
@@ -54,6 +57,9 @@ impl Framebuffer<'_> {
 }
 
 impl FramebufferTile {
+    pub const TILE_WITH: u16 = 64;
+    pub const TILE_HEIGHT: u16 = 64;
+
     pub fn width(&self) -> u16 {
         if let Some(buffer) = &self.color_buffer {
             return buffer.width;
