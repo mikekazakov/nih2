@@ -341,14 +341,13 @@ impl Rasterizer {
                 continue; // TODO: treat degenerate triangles separately
             }
 
+            // Set up the edge function biases to follow the top-left fill rule
             let is_v01_top_left = Self::is_top_left(v01);
             let is_v12_top_left = Self::is_top_left(v12);
             let is_v20_top_left = Self::is_top_left(v20);
-
-            // Not robust, stop using for now, TODO: switch to fixed-point edgefunctions
-            // let v01_bias = if is_v01_top_left { 0.0 } else { -0.001 };
-            // let v12_bias = if is_v12_top_left { 0.0 } else { -0.001 };
-            // let v20_bias = if is_v20_top_left { 0.0 } else { -0.001 };
+            let v01_bias_x24_8 = if is_v01_top_left { 0 } else { -1 };
+            let v12_bias_x24_8 = if is_v12_top_left { 0 } else { -1 };
+            let v20_bias_x24_8 = if is_v20_top_left { 0 } else { -1 };
 
             let xmin = rt_xmin.max(v0_xy.x.min(v1_xy.x).min(v2_xy.x) as i32);
             let xmax = rt_xmax.min(v0_xy.x.max(v1_xy.x).max(v2_xy.x) as i32);
@@ -365,15 +364,26 @@ impl Rasterizer {
             let v2p_min = p_min - v2_xy;
 
             // Precompute edge functions start values and increments
-            let edge0_min = v12.x * v1p_min.y - v12.y * v1p_min.x/* + v12_bias*/;
-            let edge1_min = v20.x * v2p_min.y - v20.y * v2p_min.x/* + v20_bias*/;
-            let edge2_min = v01.x * v0p_min.y - v01.y * v0p_min.x/* + v01_bias*/;
+            let edge0_min = v12.x * v1p_min.y - v12.y * v1p_min.x;
+            let edge1_min = v20.x * v2p_min.y - v20.y * v2p_min.x;
+            let edge2_min = v01.x * v0p_min.y - v01.y * v0p_min.x;
             let edge0_dx = -v12.y;
             let edge1_dx = -v20.y;
             let edge2_dx = -v01.y;
             let edge0_dy = v12.x;
             let edge1_dy = v20.x;
             let edge2_dy = v01.x;
+
+            // Convert edge functions to 24x8 fixed-point values
+            let edge0_min_24x8 = (edge0_min * 256.0).round() as i32 + v12_bias_x24_8;
+            let edge1_min_24x8 = (edge1_min * 256.0).round() as i32 + v20_bias_x24_8;
+            let edge2_min_24x8 = (edge2_min * 256.0).round() as i32 + v01_bias_x24_8;
+            let edge0_24x8_dx = (edge0_dx * 256.0).round() as i32;
+            let edge1_24x8_dx = (edge1_dx * 256.0).round() as i32;
+            let edge2_24x8_dx = (edge2_dx * 256.0).round() as i32;
+            let edge0_24x8_dy = (edge0_dy * 256.0).round() as i32;
+            let edge1_24x8_dy = (edge1_dy * 256.0).round() as i32;
+            let edge2_24x8_dy = (edge2_dy * 256.0).round() as i32;
 
             // Precompute z start value and interpolation increments
             // TODO: optimize/streamline this
@@ -422,9 +432,9 @@ impl Rasterizer {
             let inv_w_dy = edge0_dy * v0.position.w + edge1_dy * v1.position.w + edge2_dy * v2.position.w;
 
             // Set up the initial values at each consequent row
-            let mut edge0_row = edge0_min; // starting value of edge function v12
-            let mut edge1_row = edge1_min; // starting value of edge function v20
-            let mut edge2_row = edge2_min; // starting value of edge function v01
+            let mut edge0_row_24x8 = edge0_min_24x8; // starting v12 edgefunction value
+            let mut edge1_row_24x8 = edge1_min_24x8; // starting v20 edgefunction value
+            let mut edge2_row_24x8 = edge2_min_24x8; // starting v01 edgefunction value
             let mut z_24x8_row = z_24x8_min; // starting depth
             let mut r_over_w_row = r_over_w_min; // starting r/w
             let mut g_over_w_row = g_over_w_min; // starting g/w
@@ -432,9 +442,9 @@ impl Rasterizer {
             let mut inv_w_row = inv_w_min; // starting 1/w
 
             for y in ymin..=ymax {
-                let mut edge0 = edge0_row;
-                let mut edge1 = edge1_row;
-                let mut edge2 = edge2_row;
+                let mut edge0_24x8 = edge0_row_24x8;
+                let mut edge1_24x8 = edge1_row_24x8;
+                let mut edge2_24x8 = edge2_row_24x8;
                 let mut inv_w = inv_w_row;
                 let mut r_over_w = r_over_w_row;
                 let mut g_over_w = g_over_w_row;
@@ -442,11 +452,7 @@ impl Rasterizer {
                 let mut z_24x8 = z_24x8_row;
 
                 for x in xmin..=xmax {
-                    // TODO: migrate to fixed-point edgefunctions + bias and remove this nonsense
-                    if (edge0 > 0.0 || (is_v12_top_left && edge0 == 0.0))
-                        && (edge1 > 0.0 || (is_v20_top_left && edge1 == 0.0))
-                        && (edge2 > 0.0 || (is_v01_top_left && edge2 == 0.0))
-                    {
+                    if edge0_24x8 >= 0 && edge1_24x8 >= 0 && edge2_24x8 >= 0 {
                         let mut discard = false;
                         if let Some(buffer) = &mut framebuffer.depth_buffer {
                             let z_u16 = (z_24x8 >> 8) as u16;
@@ -476,18 +482,18 @@ impl Rasterizer {
                             }
                         }
                     }
-                    edge0 += edge0_dx;
-                    edge1 += edge1_dx;
-                    edge2 += edge2_dx;
+                    edge0_24x8 += edge0_24x8_dx;
+                    edge1_24x8 += edge1_24x8_dx;
+                    edge2_24x8 += edge2_24x8_dx;
                     inv_w += inv_w_dx;
                     r_over_w += r_over_w_dx;
                     g_over_w += g_over_w_dx;
                     b_over_w += b_over_w_dx;
                     z_24x8 = z_24x8.overflowing_add_signed(z_24x8_dx).0;
                 }
-                edge0_row += edge0_dy;
-                edge1_row += edge1_dy;
-                edge2_row += edge2_dy;
+                edge0_row_24x8 += edge0_24x8_dy;
+                edge1_row_24x8 += edge1_24x8_dy;
+                edge2_row_24x8 += edge2_24x8_dy;
                 inv_w_row += inv_w_dy;
                 r_over_w_row += r_over_w_dy;
                 g_over_w_row += g_over_w_dy;
@@ -965,8 +971,7 @@ mod tests {
     #[case(256, 256, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/256x256_5.png")]
     #[case(256, 256, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/256x256_6.png")]
     #[case(256, 256, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/256x256_7.png")]
-    /*Currently fails due to a gap between the triangles:*/
-    /*#[case(256, 256, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/256x256_8.png")]*/
+    #[case(256, 256, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/256x256_8.png")]
     #[case(141, 79, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/141x79_0.png")]
     #[case(141, 79, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/141x79_1.png")]
     #[case(141, 79, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/141x79_2.png")]
