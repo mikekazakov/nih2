@@ -625,6 +625,23 @@ mod tests {
         img1.save(actual_path).unwrap();
     }
 
+    fn save_normals_next_to_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) {
+        let mut actual_path = reference_path(reference);
+        actual_path.set_extension("actual.png");
+
+        let raw_rgba: Vec<u8> = result
+            .elems
+            .iter()
+            .flat_map(|&pixel| {
+                let bytes = pixel.to_le_bytes();
+                [bytes[0], bytes[1], bytes[2], 255]
+            })
+            .collect();
+        let img1: ImageBuffer<Rgba<u8>, _> =
+            ImageBuffer::from_raw(result.width as u32, result.height as u32, raw_rgba).unwrap();
+        img1.save(actual_path).unwrap();
+    }
+
     fn save_depth_next_to_reference<P: AsRef<Path>>(result: &Buffer<u16>, reference: P) {
         let mut actual_path = reference_path(reference);
         actual_path.set_extension("actual.png");
@@ -675,6 +692,35 @@ mod tests {
         })
     }
 
+    fn compare_normals_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) -> bool {
+        const ERROR_TOLERANCE: u8 = 2; // acceptable difference per channel, 2 ~= 1%
+        let reference_path = reference_path(reference);
+
+        let raw_rgba: Vec<u8> = result
+            .elems
+            .iter()
+            .flat_map(|&pixel| {
+                let bytes = pixel.to_le_bytes();
+                [bytes[0], bytes[1], bytes[2], bytes[3]]
+            })
+            .collect();
+        let img1: ImageBuffer<Rgba<u8>, _> =
+            ImageBuffer::from_raw(result.width as u32, result.height as u32, raw_rgba).unwrap();
+
+        let img2: RgbaImage = image::open(reference_path).unwrap().into_rgba8();
+
+        if img1.dimensions() != img2.dimensions() {
+            return false;
+        }
+
+        img1.pixels().zip(img2.pixels()).all(|(p1, p2)| {
+            let diff_r = (p1[0] as i16 - p2[0] as i16).abs() as u8;
+            let diff_g = (p1[1] as i16 - p2[1] as i16).abs() as u8;
+            let diff_b = (p1[2] as i16 - p2[2] as i16).abs() as u8;
+            diff_r <= ERROR_TOLERANCE && diff_g <= ERROR_TOLERANCE && diff_b <= ERROR_TOLERANCE
+        })
+    }
+
     fn compare_depth_against_reference<P: AsRef<Path>>(result: &Buffer<u16>, reference: P) -> bool {
         let reference_path = reference_path(reference);
         let reference_image: RgbaImage = image::open(reference_path).unwrap().into_rgba8();
@@ -710,6 +756,14 @@ mod tests {
         assert!(equal);
     }
 
+    fn assert_normals_against_reference<P: AsRef<Path>>(result: &Buffer<u32>, reference: P) {
+        let equal = compare_normals_against_reference(result, &reference);
+        if !equal {
+            save_normals_next_to_reference(result, &reference);
+        }
+        assert!(equal);
+    }
+
     fn render_to_64x64_albedo(command: &RasterizationCommand) -> Buffer<u32> {
         let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
         color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
@@ -723,6 +777,8 @@ mod tests {
 
         color_buffer.as_flat_buffer()
     }
+
+    // render_to_64x64_normals?
 
     fn render_to_64x64_depth(command: &RasterizationCommand) -> Buffer<u16> {
         let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
@@ -1061,6 +1117,81 @@ mod tests {
         rasterizer.commit(&command);
         rasterizer.draw(&mut framebuffer);
         assert_albedo_against_reference(&color_buffer.as_flat_buffer(), filename);
+    }
+
+    #[rstest]
+    #[case(
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        "rasterizer/interpolation/normal/simple_0.png"
+    )]
+    #[case(
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        "rasterizer/interpolation/normal/simple_1.png"
+    )]
+    #[case(
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        "rasterizer/interpolation/normal/simple_2.png"
+    )]
+    #[case(
+        Vec3::new(0.0, 0.0, -1.0),
+        Vec3::new(0.0, 0.0, -1.0),
+        Vec3::new(0.0, 0.0, -1.0),
+        "rasterizer/interpolation/normal/simple_3.png"
+    )]
+    #[case(
+        Vec3::new(0.0, -1.0, 0.0),
+        Vec3::new(0.0, -1.0, 0.0),
+        Vec3::new(0.0, -1.0, 0.0),
+        "rasterizer/interpolation/normal/simple_4.png"
+    )]
+    #[case(
+        Vec3::new(-1.0, 0.0, 0.0),
+        Vec3::new(-1.0, 0.0, 0.0),
+        Vec3::new(-1.0, 0.0, 0.0),
+        "rasterizer/interpolation/normal/simple_5.png"
+    )]
+    #[case(
+        Vec3::new(0.3, 0.3, 0.9),
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        "rasterizer/interpolation/normal/simple_6.png"
+    )]
+    #[case(
+        Vec3::new(-0.5, 0.5, 0.8),
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        "rasterizer/interpolation/normal/simple_7.png"
+    )]
+    #[case(
+        Vec3::new(-0.5, 0.7, 0.6),
+        Vec3::new(0.2, -0.4, 0.9),
+        Vec3::new(0.9, 0.2, -0.3),
+        "rasterizer/interpolation/normal/simple_8.png"
+    )]
+    fn normal_interpolation_simple(#[case] n0: Vec3, #[case] n1: Vec3, #[case] n2: Vec3, #[case] filename: &str) {
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
+            normals: &[n0, n1, n2],
+            ..Default::default()
+        };
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
+        color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+        let mut normal_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
+        normal_buffer.fill(0);
+        let mut framebuffer = Framebuffer::default();
+        framebuffer.color_buffer = Some(&mut color_buffer);
+        framebuffer.normal_buffer = Some(&mut normal_buffer);
+        let mut rasterizer = Rasterizer::new();
+        rasterizer.setup(Viewport::new(0, 0, 64, 64));
+        rasterizer.commit(&command);
+        rasterizer.draw(&mut framebuffer);
+        assert_normals_against_reference(&normal_buffer.as_flat_buffer(), filename);
     }
 }
 
