@@ -25,11 +25,13 @@ static PROFILER: Lazy<ReentrantMutex<Profiler>> = Lazy::new(|| ReentrantMutex::n
 enum DisplayMode {
     Color,
     Depth,
+    Normal,
 }
 
 struct State {
     color_buffer: TiledBuffer<u32, 64, 64>,
     depth_buffer: TiledBuffer<u16, 64, 64>,
+    normal_buffer: TiledBuffer<u32, 64, 64>,
     mesh: MeshData,
     display_mode: DisplayMode,
     overlay_tiles: bool,
@@ -44,6 +46,7 @@ impl Default for State {
         State {
             color_buffer: TiledBuffer::<u32, 64, 64>::new(1, 1),
             depth_buffer: TiledBuffer::<u16, 64, 64>::new(1, 1),
+            normal_buffer: TiledBuffer::<u32, 64, 64>::new(1, 1),
             mesh: MeshData::default(),
             display_mode: DisplayMode::Color,
             overlay_tiles: false,
@@ -94,15 +97,41 @@ fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, even
                 let depth = buffer.at(x, y);
                 if depth == 65535 {
                     // 255u8
-                    pixels[offset + 0] = 255; // B
+                    pixels[offset + 0] = 255; // R
                     pixels[offset + 1] = 200; // G
-                    pixels[offset + 2] = 255; // R
+                    pixels[offset + 2] = 255; // B
                 } else {
                     let gray = (((depth - min) as u32 * 255) / (delta)) as u8;
-                    pixels[offset + 0] = gray; // B
+                    pixels[offset + 0] = gray; // R
                     pixels[offset + 1] = gray; // G
-                    pixels[offset + 2] = gray; // R
+                    pixels[offset + 2] = gray; // B
                 };
+                pixels[offset + 3] = 255; // A
+            }
+        }
+    });
+
+    let mut windows_surface = window.surface(&event_pump).unwrap();
+    assert_eq!(windows_surface.width(), width);
+    assert_eq!(windows_surface.height(), height);
+    let rect = Rect::new(0, 0, width, height);
+    buffer_surface.blit(rect, &mut windows_surface, rect).unwrap();
+    windows_surface.finish().unwrap();
+}
+
+fn blit_normals_to_window(buffer: &Buffer<u32>, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
+    let width = buffer.width as u32;
+    let height = buffer.height as u32;
+    let mut buffer_surface = Surface::new(width, height, PixelFormatEnum::ABGR8888.into()).unwrap();
+    let pitch = buffer_surface.pitch() as usize;
+    buffer_surface.with_lock_mut(|pixels: &mut [u8]| {
+        for y in 0..buffer.height {
+            for x in 0..buffer.width {
+                let offset = y as usize * pitch + x as usize * 4;
+                let n = buffer.at(x, y);
+                pixels[offset + 0] = (n & 0xFF) as u8; // R
+                pixels[offset + 1] = ((n & 0xFF00) >> 8) as u8; // G
+                pixels[offset + 2] = ((n & 0xFF0000) >> 16) as u8; // B
                 pixels[offset + 3] = 255; // A
             }
         }
@@ -123,6 +152,7 @@ fn render(state: &mut State) {
     // (64, 224, 208)
     state.color_buffer.fill(RGBA::new(64, 224, 208, 255).to_u32());
     state.depth_buffer.fill(u16::MAX);
+    state.normal_buffer.fill(RGBA::new(127, 255, 127, 255).to_u32());
 
     let viewport = Viewport { xmin: 0, ymin: 0, xmax: state.color_buffer.width(), ymax: state.color_buffer.height() };
     // let lines = vec![
@@ -224,6 +254,10 @@ fn render(state: &mut State) {
             * Mat34::rotate_xy(/*tick as f32*/ state.t.as_secs_f32() / 1.77)
             * Mat34::rotate_zx(/*tick as f32*/ state.t.as_secs_f32() / 1.10)
             * Mat34::scale_uniform(1.5);
+
+        // cmd.model = Mat34::rotate_zx(3.14 / 2.) * Mat34::scale_uniform(1.5);
+        // cmd.model = Mat34::rotate_zx(state.t.as_secs_f32() / 1.10) * Mat34::scale_uniform(1.5);
+
         // cmd.view = Mat44::identity();
         // cmd.view = Mat44::translate(Vec3::new(0.0, 0.0, 1.0));
         // cmd.view = Mat44::scale_uniform(100.0);
@@ -251,6 +285,7 @@ fn render(state: &mut State) {
         let mut framebuffer = Framebuffer::default();
         framebuffer.color_buffer = Some(&mut state.color_buffer);
         framebuffer.depth_buffer = Some(&mut state.depth_buffer);
+        framebuffer.normal_buffer = Some(&mut state.normal_buffer);
         {
             let _profile_draw_scope = profiler::ProfileScope::new("draw", &profiler);
             rasterizer.draw(&mut framebuffer);
@@ -287,6 +322,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.display_mode = DisplayMode::Depth;
                 }
                 Event::KeyDown { keycode: Some(Keycode::_3), keymod: Mod::LGUIMOD, .. } => {
+                    state.display_mode = DisplayMode::Normal;
+                }
+                Event::KeyDown { keycode: Some(Keycode::_0), keymod: Mod::LGUIMOD, .. } => {
                     state.overlay_tiles = !state.overlay_tiles;
                 }
                 _ => {}
@@ -308,6 +346,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             if state.color_buffer.width() != size.0 as u16 || state.color_buffer.height() != size.1 as u16 {
                 state.color_buffer = TiledBuffer::<u32, 64, 64>::new(size.0 as u16, size.1 as u16);
                 state.depth_buffer = TiledBuffer::<u16, 64, 64>::new(size.0 as u16, size.1 as u16);
+                state.normal_buffer = TiledBuffer::<u32, 64, 64>::new(size.0 as u16, size.1 as u16);
             }
 
             state.dt = state.timestamp.elapsed();
@@ -332,6 +371,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 blit_to_window(&mut flat, &window, &event_pump);
             } else if state.display_mode == DisplayMode::Depth {
                 blit_depth_to_window(&state.depth_buffer.as_flat_buffer(), &window, &event_pump);
+            } else if state.display_mode == DisplayMode::Normal {
+                blit_normals_to_window(&mut state.normal_buffer.as_flat_buffer(), &window, &event_pump);
             }
         }
     }

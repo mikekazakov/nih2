@@ -116,7 +116,7 @@ impl Rasterizer {
         }
 
         let view_projection = command.projection * command.view;
-        let normal_matrix = command.view.as_mat33() * command.model.as_mat33().inverse();
+        let normal_matrix = command.model.as_mat33().inverse().transpose();
         let viewport_scale = self.viewport_scale;
         let scheduled_vertices_start = self.vertices.len();
 
@@ -289,6 +289,15 @@ impl Rasterizer {
     //     x | 0xFF
     // }
 
+    fn encode_normal_as_u32(nx: f32, ny: f32, nz: f32) -> u32 {
+        unsafe {
+            let x8: u8 = (nx * 127.5 + 127.5).to_int_unchecked();
+            let y8: u8 = (ny * 127.5 + 127.5).to_int_unchecked();
+            let z8: u8 = (nz * 127.5 + 127.5).to_int_unchecked();
+            (x8 as u32) | ((y8 as u32) << 8) | ((z8 as u32) << 16)
+        }
+    }
+
     fn is_top_left(edge: Vec2) -> bool {
         if edge.y < 0.0 {
             return true; // left edge
@@ -397,39 +406,50 @@ impl Rasterizer {
             let z_24x8_dx = (z_f32_dx * 256.0) as i32;
             let z_24x8_dy = (z_f32_dy * 256.0) as i32;
 
+            // Express per-vertex edgefunctions, 1/w, colors/w and N/w as Vectors-3 to simplify the setup math
+            let edge_min_v3 = Vec3::new(edge0_min, edge1_min, edge2_min);
+            let edge_dx_v3 = Vec3::new(edge0_dx, edge1_dx, edge2_dx);
+            let edge_dy_v3 = Vec3::new(edge0_dy, edge1_dy, edge2_dy);
+            let inv_w_v3 = Vec3::new(v0.position.w, v1.position.w, v2.position.w);
+            let r_over_w_v3 =
+                Vec3::new(v0.color.x * v0.position.w, v1.color.x * v1.position.w, v2.color.x * v2.position.w);
+            let g_over_w_v3 =
+                Vec3::new(v0.color.y * v0.position.w, v1.color.y * v1.position.w, v2.color.y * v2.position.w);
+            let b_over_w_v3 =
+                Vec3::new(v0.color.z * v0.position.w, v1.color.z * v1.position.w, v2.color.z * v2.position.w);
+            let nx_over_w_v3 =
+                Vec3::new(v0.normal.x * v0.position.w, v1.normal.x * v1.position.w, v2.normal.x * v2.position.w);
+            let ny_over_w_v3 =
+                Vec3::new(v0.normal.y * v0.position.w, v1.normal.y * v1.position.w, v2.normal.y * v2.position.w);
+            let nz_over_w_v3 =
+                Vec3::new(v0.normal.z * v0.position.w, v1.normal.z * v1.position.w, v2.normal.z * v2.position.w);
+
             // Precompute color/w start values and interpolation increments
-            let r_over_w_min = edge0_min * v0.color.x * v0.position.w
-                + edge1_min * v1.color.x * v1.position.w
-                + edge2_min * v2.color.x * v2.position.w;
-            let r_over_w_dx = edge0_dx * v0.color.x * v0.position.w
-                + edge1_dx * v1.color.x * v1.position.w
-                + edge2_dx * v2.color.x * v2.position.w;
-            let r_over_w_dy = edge0_dy * v0.color.x * v0.position.w
-                + edge1_dy * v1.color.x * v1.position.w
-                + edge2_dy * v2.color.x * v2.position.w;
-            let g_over_w_min = edge0_min * v0.color.y * v0.position.w
-                + edge1_min * v1.color.y * v1.position.w
-                + edge2_min * v2.color.y * v2.position.w;
-            let g_over_w_dx = edge0_dx * v0.color.y * v0.position.w
-                + edge1_dx * v1.color.y * v1.position.w
-                + edge2_dx * v2.color.y * v2.position.w;
-            let g_over_w_dy = edge0_dy * v0.color.y * v0.position.w
-                + edge1_dy * v1.color.y * v1.position.w
-                + edge2_dy * v2.color.y * v2.position.w;
-            let b_over_w_min = edge0_min * v0.color.z * v0.position.w
-                + edge1_min * v1.color.z * v1.position.w
-                + edge2_min * v2.color.z * v2.position.w;
-            let b_over_w_dx = edge0_dx * v0.color.z * v0.position.w
-                + edge1_dx * v1.color.z * v1.position.w
-                + edge2_dx * v2.color.z * v2.position.w;
-            let b_over_w_dy = edge0_dy * v0.color.z * v0.position.w
-                + edge1_dy * v1.color.z * v1.position.w
-                + edge2_dy * v2.color.z * v2.position.w;
+            let r_over_w_min = dot(edge_min_v3, r_over_w_v3);
+            let r_over_w_dx = dot(edge_dx_v3, r_over_w_v3);
+            let r_over_w_dy = dot(edge_dy_v3, r_over_w_v3);
+            let g_over_w_min = dot(edge_min_v3, g_over_w_v3);
+            let g_over_w_dx = dot(edge_dx_v3, g_over_w_v3);
+            let g_over_w_dy = dot(edge_dy_v3, g_over_w_v3);
+            let b_over_w_min = dot(edge_min_v3, b_over_w_v3);
+            let b_over_w_dx = dot(edge_dx_v3, b_over_w_v3);
+            let b_over_w_dy = dot(edge_dy_v3, b_over_w_v3);
+
+            // Precompute normal/w start values and interpolation increments
+            let nx_over_w_min = dot(edge_min_v3, nx_over_w_v3);
+            let nx_over_w_dx = dot(edge_dx_v3, nx_over_w_v3);
+            let nx_over_w_dy = dot(edge_dy_v3, nx_over_w_v3);
+            let ny_over_w_min = dot(edge_min_v3, ny_over_w_v3);
+            let ny_over_w_dx = dot(edge_dx_v3, ny_over_w_v3);
+            let ny_over_w_dy = dot(edge_dy_v3, ny_over_w_v3);
+            let nz_over_w_min = dot(edge_min_v3, nz_over_w_v3);
+            let nz_over_w_dx = dot(edge_dx_v3, nz_over_w_v3);
+            let nz_over_w_dy = dot(edge_dy_v3, nz_over_w_v3);
 
             // Precompute 1/w start value and interpolation increments
-            let inv_w_min = edge0_min * v0.position.w + edge1_min * v1.position.w + edge2_min * v2.position.w;
-            let inv_w_dx = edge0_dx * v0.position.w + edge1_dx * v1.position.w + edge2_dx * v2.position.w;
-            let inv_w_dy = edge0_dy * v0.position.w + edge1_dy * v1.position.w + edge2_dy * v2.position.w;
+            let inv_w_min = dot(edge_min_v3, inv_w_v3);
+            let inv_w_dx = dot(edge_dx_v3, inv_w_v3);
+            let inv_w_dy = dot(edge_dy_v3, inv_w_v3);
 
             // Set up the initial values at each consequent row
             let mut edge0_row_24x8 = edge0_min_24x8; // starting v12 edgefunction value
@@ -439,6 +459,9 @@ impl Rasterizer {
             let mut r_over_w_row = r_over_w_min; // starting r/w
             let mut g_over_w_row = g_over_w_min; // starting g/w
             let mut b_over_w_row = b_over_w_min; // starting b/w
+            let mut nx_over_w_row = nx_over_w_min; // starting nx/w
+            let mut ny_over_w_row = ny_over_w_min; // starting ny/w
+            let mut nz_over_w_row = nz_over_w_min; // starting nz/w
             let mut inv_w_row = inv_w_min; // starting 1/w
 
             for y in ymin..=ymax {
@@ -449,6 +472,9 @@ impl Rasterizer {
                 let mut r_over_w = r_over_w_row;
                 let mut g_over_w = g_over_w_row;
                 let mut b_over_w = b_over_w_row;
+                let mut nx_over_w = nx_over_w_row;
+                let mut ny_over_w = ny_over_w_row;
+                let mut nz_over_w = nz_over_w_row;
                 let mut z_24x8 = z_24x8_row;
 
                 for x in xmin..=xmax {
@@ -466,19 +492,26 @@ impl Rasterizer {
                         if !discard {
                             let inv_inv_w = 1.0 / inv_w;
 
-                            let r = r_over_w * inv_inv_w;
-                            let g = g_over_w * inv_inv_w;
-                            let b = b_over_w * inv_inv_w;
-                            let color = RGBA::new(
-                                (r * 255.0).clamp(0.0, 255.0) as u8, //
-                                (g * 255.0).clamp(0.0, 255.0) as u8, //
-                                (b * 255.0).clamp(0.0, 255.0) as u8, //
-                                255,
-                            )
-                            .to_u32();
-
                             if let Some(buffer) = &mut framebuffer.color_buffer {
+                                let r = r_over_w * inv_inv_w;
+                                let g = g_over_w * inv_inv_w;
+                                let b = b_over_w * inv_inv_w;
+                                let color = RGBA::new(
+                                    (r * 255.0).clamp(0.0, 255.0) as u8, //
+                                    (g * 255.0).clamp(0.0, 255.0) as u8, //
+                                    (b * 255.0).clamp(0.0, 255.0) as u8, //
+                                    255,
+                                )
+                                .to_u32();
                                 *buffer.get(x as usize, y as usize) = color;
+                            }
+
+                            if let Some(buffer) = &mut framebuffer.normal_buffer {
+                                *buffer.get(x as usize, y as usize) = Self::encode_normal_as_u32(
+                                    nx_over_w * inv_inv_w,
+                                    ny_over_w * inv_inv_w,
+                                    nz_over_w * inv_inv_w,
+                                );
                             }
                         }
                     }
@@ -489,6 +522,9 @@ impl Rasterizer {
                     r_over_w += r_over_w_dx;
                     g_over_w += g_over_w_dx;
                     b_over_w += b_over_w_dx;
+                    nx_over_w += nx_over_w_dx;
+                    ny_over_w += ny_over_w_dx;
+                    nz_over_w += nz_over_w_dx;
                     z_24x8 = z_24x8.overflowing_add_signed(z_24x8_dx).0;
                 }
                 edge0_row_24x8 += edge0_24x8_dy;
@@ -498,6 +534,9 @@ impl Rasterizer {
                 r_over_w_row += r_over_w_dy;
                 g_over_w_row += g_over_w_dy;
                 b_over_w_row += b_over_w_dy;
+                nx_over_w_row += nx_over_w_dy;
+                ny_over_w_row += ny_over_w_dy;
+                nz_over_w_row += nz_over_w_dy;
                 z_24x8_row = z_24x8_row.overflowing_add_signed(z_24x8_dy).0;
             }
         }

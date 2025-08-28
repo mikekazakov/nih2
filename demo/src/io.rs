@@ -39,21 +39,30 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> nih::render::MeshData {
                         model.objects[0].tex_vertices[v2.1.unwrap()].u as f32,
                         model.objects[0].tex_vertices[v2.1.unwrap()].v as f32,
                     ));
-                    mesh.normals.push(Vec3::new(
-                        model.objects[0].normals[v0.2.unwrap()].x as f32,
-                        model.objects[0].normals[v0.2.unwrap()].y as f32,
-                        model.objects[0].normals[v0.2.unwrap()].z as f32,
-                    ));
-                    mesh.normals.push(Vec3::new(
-                        model.objects[0].normals[v1.2.unwrap()].x as f32,
-                        model.objects[0].normals[v1.2.unwrap()].y as f32,
-                        model.objects[0].normals[v1.2.unwrap()].z as f32,
-                    ));
-                    mesh.normals.push(Vec3::new(
-                        model.objects[0].normals[v2.2.unwrap()].x as f32,
-                        model.objects[0].normals[v2.2.unwrap()].y as f32,
-                        model.objects[0].normals[v2.2.unwrap()].z as f32,
-                    ));
+                    mesh.normals.push(
+                        Vec3::new(
+                            model.objects[0].normals[v0.2.unwrap()].x as f32,
+                            model.objects[0].normals[v0.2.unwrap()].y as f32,
+                            model.objects[0].normals[v0.2.unwrap()].z as f32,
+                        )
+                        .normalized(),
+                    );
+                    mesh.normals.push(
+                        Vec3::new(
+                            model.objects[0].normals[v1.2.unwrap()].x as f32,
+                            model.objects[0].normals[v1.2.unwrap()].y as f32,
+                            model.objects[0].normals[v1.2.unwrap()].z as f32,
+                        )
+                        .normalized(),
+                    );
+                    mesh.normals.push(
+                        Vec3::new(
+                            model.objects[0].normals[v2.2.unwrap()].x as f32,
+                            model.objects[0].normals[v2.2.unwrap()].y as f32,
+                            model.objects[0].normals[v2.2.unwrap()].z as f32,
+                        )
+                        .normalized(),
+                    );
 
                     mesh.indices.push((mesh.positions.len() - 3) as u32);
                     mesh.indices.push((mesh.positions.len() - 2) as u32);

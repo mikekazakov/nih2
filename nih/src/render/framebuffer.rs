@@ -3,16 +3,20 @@ use super::*;
 pub struct Framebuffer<'a> {
     pub color_buffer: Option<&'a mut TiledBuffer<u32, 64, 64>>,
     pub depth_buffer: Option<&'a mut TiledBuffer<u16, 64, 64>>,
+
+    // NB! Normals might be not normalized!
+    pub normal_buffer: Option<&'a mut TiledBuffer<u32, 64, 64>>,
 }
 
 pub struct FramebufferTile {
     pub color_buffer: Option<TiledBufferTileMut<u32, 64, 64>>,
     pub depth_buffer: Option<TiledBufferTileMut<u16, 64, 64>>,
+    pub normal_buffer: Option<TiledBufferTileMut<u32, 64, 64>>,
 }
 
 impl Default for Framebuffer<'_> {
     fn default() -> Self {
-        Self { color_buffer: None, depth_buffer: None }
+        Self { color_buffer: None, depth_buffer: None, normal_buffer: None }
     }
 }
 
@@ -48,6 +52,11 @@ impl Framebuffer<'_> {
                 None
             },
             depth_buffer: if let Some(buffer) = self.depth_buffer.as_mut() {
+                Some(buffer.tile_mut(x, y))
+            } else {
+                None
+            },
+            normal_buffer: if let Some(buffer) = self.normal_buffer.as_mut() {
                 Some(buffer.tile_mut(x, y))
             } else {
                 None

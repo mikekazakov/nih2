@@ -1,6 +1,8 @@
 use crate::math::*;
+use bytemuck::{Pod, Zeroable};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Zeroable, Pod)]
+#[repr(C)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -31,6 +33,12 @@ impl Vec3 {
 
     pub fn as_point4(self) -> Vec4 {
         Vec4 { x: self.x, y: self.y, z: self.z, w: 1. }
+    }
+}
+
+impl Default for Vec3 {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0, z: 0.0 }
     }
 }
 
@@ -72,6 +80,14 @@ impl std::ops::Sub for Vec3 {
     type Output = Vec3;
     fn sub(self, other: Vec3) -> Vec3 {
         Vec3 { x: self.x - other.x, y: self.y - other.y, z: self.z - other.z }
+    }
+}
+
+// Vec3 * Vec3
+impl std::ops::Mul<Vec3> for Vec3 {
+    type Output = Vec3;
+    fn mul(self, other: Vec3) -> Vec3 {
+        Vec3 { x: self.x * other.x, y: self.y * other.y, z: self.z * other.z }
     }
 }
 
