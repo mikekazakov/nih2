@@ -33,6 +33,7 @@ struct State {
     depth_buffer: TiledBuffer<u16, 64, 64>,
     normal_buffer: TiledBuffer<u32, 64, 64>,
     mesh: MeshData,
+    mesh2: MeshData,
     display_mode: DisplayMode,
     overlay_tiles: bool,
     timestamp: Instant,
@@ -48,6 +49,7 @@ impl Default for State {
             depth_buffer: TiledBuffer::<u16, 64, 64>::new(1, 1),
             normal_buffer: TiledBuffer::<u32, 64, 64>::new(1, 1),
             mesh: MeshData::default(),
+            mesh2: MeshData::default(),
             display_mode: DisplayMode::Color,
             overlay_tiles: false,
             timestamp: Instant::now(),
@@ -74,17 +76,17 @@ fn blit_to_window(buffer: &mut Buffer<u32>, window: &sdl3::video::Window, event_
 }
 
 fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
-    let mut max = 0;
-    let mut min = 65535;
-    buffer.elems.iter().for_each(|&x| {
-        if x > max && x != 65535 {
-            max = x;
-        }
-        if x < min {
-            min = x;
-        }
-    });
-    let delta = (max - min) as u32;
+    // let mut max = 0;
+    // let mut min = 65535;
+    // buffer.elems.iter().for_each(|&x| {
+    //     if x > max && x != 65535 {
+    //         max = x;
+    //     }
+    //     if x < min {
+    //         min = x;
+    //     }
+    // });
+    // let delta = (max - min) as u32;
 
     let width = buffer.width as u32;
     let height = buffer.height as u32;
@@ -101,7 +103,8 @@ fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, even
                     pixels[offset + 1] = 200; // G
                     pixels[offset + 2] = 255; // B
                 } else {
-                    let gray = (((depth - min) as u32 * 255) / (delta)) as u8;
+                    // let gray = (((depth - min) as u32 * 255) / (delta)) as u8;
+                    let gray = (((depth) as u32 * 255) / (65534)) as u8;
                     pixels[offset + 0] = gray; // R
                     pixels[offset + 1] = gray; // G
                     pixels[offset + 2] = gray; // B
@@ -237,50 +240,56 @@ fn render(state: &mut State) {
             }
         }
 
-        let mut colors = Vec::<Vec4>::default();
+        let mut colors1 = Vec::<Vec4>::default();
         for i in 0..state.mesh.positions.len() {
-            colors.push(idx_to_color_hash(i));
+            colors1.push(idx_to_color_hash(i));
+        }
+        let mut colors2 = Vec::<Vec4>::default();
+        for i in 0..state.mesh2.positions.len() {
+            colors2.push(idx_to_color_hash(i));
         }
 
         let mut cmd = RasterizationCommand::default();
-        cmd.world_positions = &state.mesh.positions;
-        cmd.normals = &state.mesh.normals;
-        cmd.tex_coords = &state.mesh.tex_coords;
-        cmd.colors =  /*&state.mesh.colors*/&colors;
-        cmd.indices = &state.mesh.indices;
-        // model: Mat34::translate(Vec3::new(0.0, -0.8, 0.0)),
-        // model: Mat34::identity(),
-        cmd.model = Mat34::rotate_yz(/*tick as f32 */ state.t.as_secs_f32() / 3.77)
-            * Mat34::rotate_xy(/*tick as f32*/ state.t.as_secs_f32() / 1.77)
-            * Mat34::rotate_zx(/*tick as f32*/ state.t.as_secs_f32() / 1.10)
-            * Mat34::scale_uniform(1.5);
-
-        // cmd.model = Mat34::rotate_zx(3.14 / 2.) * Mat34::scale_uniform(1.5);
-        // cmd.model = Mat34::rotate_zx(state.t.as_secs_f32() / 1.10) * Mat34::scale_uniform(1.5);
-
-        // cmd.view = Mat44::identity();
-        // cmd.view = Mat44::translate(Vec3::new(0.0, 0.0, 1.0));
-        // cmd.view = Mat44::scale_uniform(100.0);
-        cmd.view = Mat44::translate(Vec3::new(0.0, 0.0, -4.0));
-        // cmd.model = Mat34::scale_uniform(100.0);
+        // cmd.view = Mat44::translate(Vec3::new(0.0, 0.0, -4.0));
         cmd.projection =
             Mat44::perspective(1.0, 20.0, std::f32::consts::PI / 3.0, viewport.xmax as f32 / viewport.ymax as f32);
         cmd.culling = CullMode::CW;
-        // color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-        // color: Vec4::new(1.0, 1.0, 1.0, 1.0),
-        // };
+
+        // {
+        //     cmd.world_positions = &state.mesh.positions;
+        //     cmd.normals = &state.mesh.normals;
+        //     cmd.tex_coords = &state.mesh.tex_coords;
+        //     cmd.colors = &colors1;
+        //     cmd.indices = &state.mesh.indices;
+        //     cmd.model = Mat34::rotate_yz(state.t.as_secs_f32() / 3.77)
+        //         * Mat34::rotate_xy(state.t.as_secs_f32() / 1.77)
+        //         * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
+        //         * Mat34::scale_uniform(1.5);
+        //     {
+        //         let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
+        //         rasterizer.commit(&cmd);
+        //     }
+        // }
 
         {
-            let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
-            rasterizer.commit(&cmd);
+            let mut colors = Vec::<Vec4>::default();
+            for i in 0..state.mesh2.positions.len() {
+                colors.push(idx_to_color_hash(i));
+            }
+            cmd.world_positions = &state.mesh2.positions;
+            cmd.normals = &state.mesh2.normals;
+            // cmd.normals = &[];
+            cmd.tex_coords = &state.mesh2.tex_coords;
+            cmd.colors = &colors2;
+            cmd.indices = &state.mesh2.indices;
+            cmd.model = Mat34::translate(Vec3::new(0.0, -3.0, -10.0))
+                * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
+                * Mat34::scale_uniform(2.0);
+            {
+                let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
+                rasterizer.commit(&cmd);
+            }
         }
-
-        // Z: [-1, 1]
-        // near -> -1
-        // far  -> +1
-        // pub fn perspective(near: f32, far: f32, fov_y: f32, aspect_ratio: f32) -> Mat44 {
-
-        // g_Scene.camera_projection = Mat44::perspective(1.f, 40.f, std::numbers::pi / 3.f, f32(g_Width) / f32(g_Height) );
 
         let mut framebuffer = Framebuffer::default();
         framebuffer.color_buffer = Some(&mut state.color_buffer);
@@ -305,6 +314,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut state = State::default();
     state.mesh = io::load_obj(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Lamp2.obj"));
+    state.mesh2 = io::load_obj(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Teapot.obj"));
 
     let mut event_pump = sdl_context.event_pump().map_err(|e| e.to_string())?;
 

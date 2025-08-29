@@ -149,9 +149,9 @@ impl Rasterizer {
                 input_vertices[1].normal = face_normal;
                 input_vertices[2].normal = face_normal;
             } else {
-                input_vertices[0].normal = normal_matrix * command.normals[i0];
-                input_vertices[1].normal = normal_matrix * command.normals[i1];
-                input_vertices[2].normal = normal_matrix * command.normals[i2];
+                input_vertices[0].normal = (normal_matrix * command.normals[i0]).normalized();
+                input_vertices[1].normal = (normal_matrix * command.normals[i1]).normalized();
+                input_vertices[2].normal = (normal_matrix * command.normals[i2]).normalized();
             }
             if command.colors.is_empty() {
                 input_vertices[0].color = command.color;
