@@ -2,8 +2,10 @@ use super::super::math::*;
 use super::*;
 use arrayvec::ArrayVec;
 use std::cmp::{max, min};
+use std::ops::AddAssign;
 // use arrayvec::ArrayVec;
 // use std::mem::swap;
+use std::ptr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CullMode {
@@ -233,7 +235,7 @@ impl Rasterizer {
     }
 
     pub fn draw(&mut self, framebuffer: &mut Framebuffer) {
-        if framebuffer.color_buffer.is_none() || self.vertices.is_empty() {
+        if self.vertices.is_empty() {
             return;
         }
 
@@ -267,13 +269,13 @@ impl Rasterizer {
                 tile_verts.push(vertices[tri.tri_start as usize + 2]);
 
                 if tile_verts.is_full() {
-                    self.draw_triangles(&mut job.framebuffer_tile, viewport, &tile_verts);
+                    self.draw_triangles_dispatch(&mut job.framebuffer_tile, viewport, &tile_verts);
                     tile_verts.clear();
                 }
             }
 
             if !tile_verts.is_empty() {
-                self.draw_triangles(&mut job.framebuffer_tile, viewport, &tile_verts);
+                self.draw_triangles_dispatch(&mut job.framebuffer_tile, viewport, &tile_verts);
             }
         });
     }
@@ -310,11 +312,40 @@ impl Rasterizer {
         return false;
     }
 
-    fn draw_triangles(&self, framebuffer: &mut FramebufferTile, local_viewport: Viewport, vertices: &[Vertex]) {
+    fn draw_triangles_dispatch(
+        &self,
+        framebuffer: &mut FramebufferTile,
+        local_viewport: Viewport,
+        vertices: &[Vertex],
+    ) {
+        let has_color = framebuffer.color_buffer.is_some();
+        let has_depth = framebuffer.depth_buffer.is_some();
+        let has_normal = framebuffer.normal_buffer.is_some();
+        match (has_color, has_depth, has_normal) {
+            (false, false, false) => self.draw_triangles::<false, false, false>(framebuffer, local_viewport, vertices),
+            (true, false, false) => self.draw_triangles::<true, false, false>(framebuffer, local_viewport, vertices),
+            (false, true, false) => self.draw_triangles::<false, true, false>(framebuffer, local_viewport, vertices),
+            (false, false, true) => self.draw_triangles::<false, false, true>(framebuffer, local_viewport, vertices),
+            (true, true, false) => self.draw_triangles::<true, true, false>(framebuffer, local_viewport, vertices),
+            (true, false, true) => self.draw_triangles::<true, false, true>(framebuffer, local_viewport, vertices),
+            (false, true, true) => self.draw_triangles::<false, true, true>(framebuffer, local_viewport, vertices),
+            (true, true, true) => self.draw_triangles::<true, true, true>(framebuffer, local_viewport, vertices),
+        }
+    }
+
+    fn draw_triangles<const HAS_COLOR_BUFFER: bool, const HAS_DEPTH_BUFFER: bool, const HAS_NORMAL_BUFFER: bool>(
+        &self,
+        framebuffer: &mut FramebufferTile,
+        local_viewport: Viewport,
+        vertices: &[Vertex],
+    ) {
         assert!(local_viewport.xmin >= framebuffer.origin_x());
         assert!(local_viewport.xmax >= framebuffer.origin_x());
         assert!(local_viewport.ymin >= framebuffer.origin_y());
         assert!(local_viewport.ymax >= framebuffer.origin_y());
+        debug_assert_eq!(HAS_COLOR_BUFFER, framebuffer.color_buffer.is_some());
+        debug_assert_eq!(HAS_DEPTH_BUFFER, framebuffer.depth_buffer.is_some());
+        debug_assert_eq!(HAS_NORMAL_BUFFER, framebuffer.normal_buffer.is_some());
         let triangles_num = vertices.len() / 3;
         if triangles_num == 0 {
             return;
@@ -451,6 +482,44 @@ impl Rasterizer {
             let inv_w_dx = dot(edge_dx_v3, inv_w_v3);
             let inv_w_dy = dot(edge_dy_v3, inv_w_v3);
 
+            // Set up initial target pointers
+            let mut color_row_ptr: *mut u32 = if HAS_COLOR_BUFFER {
+                unsafe {
+                    framebuffer
+                        .color_buffer
+                        .as_mut()
+                        .unwrap_unchecked()
+                        .ptr
+                        .add((ymin * Framebuffer::TILE_WITH as i32 + xmin) as usize)
+                }
+            } else {
+                ptr::null_mut()
+            };
+            let mut depth_row_ptr: *mut u16 = if HAS_DEPTH_BUFFER {
+                unsafe {
+                    framebuffer
+                        .depth_buffer
+                        .as_mut()
+                        .unwrap_unchecked()
+                        .ptr
+                        .add((ymin * Framebuffer::TILE_WITH as i32 + xmin) as usize)
+                }
+            } else {
+                ptr::null_mut()
+            };
+            let mut normal_row_ptr: *mut u32 = if HAS_NORMAL_BUFFER {
+                unsafe {
+                    framebuffer
+                        .normal_buffer
+                        .as_mut()
+                        .unwrap_unchecked()
+                        .ptr
+                        .add((ymin * Framebuffer::TILE_WITH as i32 + xmin) as usize)
+                }
+            } else {
+                ptr::null_mut()
+            };
+
             // Set up the initial values at each consequent row
             let mut edge0_row_24x8 = edge0_min_24x8; // starting v12 edgefunction value
             let mut edge1_row_24x8 = edge1_min_24x8; // starting v20 edgefunction value
@@ -464,7 +533,7 @@ impl Rasterizer {
             let mut nz_over_w_row = nz_over_w_min; // starting nz/w
             let mut inv_w_row = inv_w_min; // starting 1/w
 
-            for y in ymin..=ymax {
+            for _y in ymin..=ymax {
                 let mut edge0_24x8 = edge0_row_24x8;
                 let mut edge1_24x8 = edge1_row_24x8;
                 let mut edge2_24x8 = edge2_row_24x8;
@@ -476,23 +545,41 @@ impl Rasterizer {
                 let mut ny_over_w = ny_over_w_row;
                 let mut nz_over_w = nz_over_w_row;
                 let mut z_24x8 = z_24x8_row;
+                let mut color_ptr: *mut u32 = if HAS_COLOR_BUFFER {
+                    color_row_ptr
+                } else {
+                    ptr::null_mut()
+                };
+                let mut depth_ptr: *mut u16 = if HAS_DEPTH_BUFFER {
+                    depth_row_ptr
+                } else {
+                    ptr::null_mut()
+                };
+                let mut normal_ptr: *mut u32 = if HAS_NORMAL_BUFFER {
+                    normal_row_ptr
+                } else {
+                    ptr::null_mut()
+                };
 
-                for x in xmin..=xmax {
+                for _x in xmin..=xmax {
                     if edge0_24x8 >= 0 && edge1_24x8 >= 0 && edge2_24x8 >= 0 {
                         let mut discard = false;
-                        if let Some(buffer) = &mut framebuffer.depth_buffer {
+
+                        if HAS_DEPTH_BUFFER {
                             let z_u16 = (z_24x8 >> 8) as u16;
-                            let dst_z = buffer.get(x as usize, y as usize);
-                            if z_u16 < *dst_z {
-                                *dst_z = z_u16;
-                            } else {
-                                discard = true;
+                            unsafe {
+                                if z_u16 < *depth_ptr {
+                                    *depth_ptr = z_u16;
+                                } else {
+                                    discard = true;
+                                }
                             }
                         }
+
                         if !discard {
                             let inv_inv_w = 1.0 / inv_w;
 
-                            if let Some(buffer) = &mut framebuffer.color_buffer {
+                            if HAS_COLOR_BUFFER {
                                 let r = r_over_w * inv_inv_w;
                                 let g = g_over_w * inv_inv_w;
                                 let b = b_over_w * inv_inv_w;
@@ -503,21 +590,26 @@ impl Rasterizer {
                                     255,
                                 )
                                 .to_u32();
-                                *buffer.get(x as usize, y as usize) = color;
+                                unsafe {
+                                    *color_ptr = color;
+                                }
                             }
 
-                            if let Some(buffer) = &mut framebuffer.normal_buffer {
-                                *buffer.get(x as usize, y as usize) = Self::encode_normal_as_u32(
-                                    nx_over_w * inv_inv_w,
-                                    ny_over_w * inv_inv_w,
-                                    nz_over_w * inv_inv_w,
-                                );
+                            if HAS_NORMAL_BUFFER {
+                                unsafe {
+                                    *normal_ptr = Self::encode_normal_as_u32(
+                                        nx_over_w * inv_inv_w,
+                                        ny_over_w * inv_inv_w,
+                                        nz_over_w * inv_inv_w,
+                                    );
+                                }
                             }
                         }
                     }
                     edge0_24x8 += edge0_24x8_dx;
                     edge1_24x8 += edge1_24x8_dx;
                     edge2_24x8 += edge2_24x8_dx;
+                    z_24x8 = z_24x8.overflowing_add_signed(z_24x8_dx).0;
                     inv_w += inv_w_dx;
                     r_over_w += r_over_w_dx;
                     g_over_w += g_over_w_dx;
@@ -525,11 +617,26 @@ impl Rasterizer {
                     nx_over_w += nx_over_w_dx;
                     ny_over_w += ny_over_w_dx;
                     nz_over_w += nz_over_w_dx;
-                    z_24x8 = z_24x8.overflowing_add_signed(z_24x8_dx).0;
+                    if HAS_COLOR_BUFFER {
+                        unsafe {
+                            color_ptr = color_ptr.add(1);
+                        }
+                    }
+                    if HAS_DEPTH_BUFFER {
+                        unsafe {
+                            depth_ptr = depth_ptr.add(1);
+                        }
+                    }
+                    if HAS_NORMAL_BUFFER {
+                        unsafe {
+                            normal_ptr = normal_ptr.add(1);
+                        }
+                    }
                 }
                 edge0_row_24x8 += edge0_24x8_dy;
                 edge1_row_24x8 += edge1_24x8_dy;
                 edge2_row_24x8 += edge2_24x8_dy;
+                z_24x8_row = z_24x8_row.overflowing_add_signed(z_24x8_dy).0;
                 inv_w_row += inv_w_dy;
                 r_over_w_row += r_over_w_dy;
                 g_over_w_row += g_over_w_dy;
@@ -537,7 +644,21 @@ impl Rasterizer {
                 nx_over_w_row += nx_over_w_dy;
                 ny_over_w_row += ny_over_w_dy;
                 nz_over_w_row += nz_over_w_dy;
-                z_24x8_row = z_24x8_row.overflowing_add_signed(z_24x8_dy).0;
+                if HAS_COLOR_BUFFER {
+                    unsafe {
+                        color_row_ptr = color_row_ptr.add(Framebuffer::TILE_WITH as usize);
+                    }
+                }
+                if HAS_DEPTH_BUFFER {
+                    unsafe {
+                        depth_row_ptr = depth_row_ptr.add(Framebuffer::TILE_WITH as usize);
+                    }
+                }
+                if HAS_NORMAL_BUFFER {
+                    unsafe {
+                        normal_row_ptr = normal_row_ptr.add(Framebuffer::TILE_WITH as usize);
+                    }
+                }
             }
         }
     }
@@ -781,12 +902,12 @@ mod tests {
     // render_to_64x64_normals?
 
     fn render_to_64x64_depth(command: &RasterizationCommand) -> Buffer<u16> {
-        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
-        color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+        // let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
+        // color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
         let mut depth_buffer = TiledBuffer::<u16, 64, 64>::new(64, 64);
         depth_buffer.fill(65535);
         let mut framebuffer = Framebuffer::default();
-        framebuffer.color_buffer = Some(&mut color_buffer);
+        // framebuffer.color_buffer = Some(&mut color_buffer);
         framebuffer.depth_buffer = Some(&mut depth_buffer);
 
         let mut rasterizer = Rasterizer::new();
