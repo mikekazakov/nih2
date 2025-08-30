@@ -32,6 +32,8 @@ struct State {
     color_buffer: TiledBuffer<u32, 64, 64>,
     depth_buffer: TiledBuffer<u16, 64, 64>,
     normal_buffer: TiledBuffer<u32, 64, 64>,
+    rasterizer: Rasterizer,
+    rasterizer_stats: RasterizerStatistics,
     mesh: MeshData,
     mesh2: MeshData,
     display_mode: DisplayMode,
@@ -48,6 +50,8 @@ impl Default for State {
             color_buffer: TiledBuffer::<u32, 64, 64>::new(1, 1),
             depth_buffer: TiledBuffer::<u16, 64, 64>::new(1, 1),
             normal_buffer: TiledBuffer::<u32, 64, 64>::new(1, 1),
+            rasterizer: Rasterizer::new(),
+            rasterizer_stats: RasterizerStatistics::default(),
             mesh: MeshData::default(),
             mesh2: MeshData::default(),
             display_mode: DisplayMode::Color,
@@ -158,6 +162,8 @@ fn render(state: &mut State) {
     state.normal_buffer.fill(RGBA::new(127, 255, 127, 255).to_u32());
 
     let viewport = Viewport { xmin: 0, ymin: 0, xmax: state.color_buffer.width(), ymax: state.color_buffer.height() };
+    let rasterizer = &mut state.rasterizer;
+    rasterizer.setup(viewport);
     // let lines = vec![
     //     Vec3::new(0.0, 0.0, 0.0),
     //     Vec3::new(0.5, 0.0, 0.0), //
@@ -218,8 +224,8 @@ fn render(state: &mut State) {
         //     pub view: Mat44,
         //     pub projection: Mat44,
         // }
-        let mut rasterizer = Rasterizer::new();
-        rasterizer.setup(viewport);
+        // let mut rasterizer = Rasterizer::new();
+        // rasterizer.setup(viewport);
 
         fn idx_to_color_hash(x: usize) -> Vec4 {
             // Mix the bits using a few bitwise operations and multiplications
@@ -288,6 +294,16 @@ fn render(state: &mut State) {
             {
                 let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
                 rasterizer.commit(&cmd);
+
+                cmd.model = Mat34::translate(Vec3::new(-4.0, -3.0, -10.0))
+                    * Mat34::rotate_zx(state.t.as_secs_f32() / 1.20)
+                    * Mat34::scale_uniform(2.0);
+                rasterizer.commit(&cmd);
+
+                cmd.model = Mat34::translate(Vec3::new(4.0, -3.0, -10.0))
+                    * Mat34::rotate_zx(state.t.as_secs_f32() / 1.30)
+                    * Mat34::scale_uniform(2.0);
+                rasterizer.commit(&cmd);
             }
         }
 
@@ -342,17 +358,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         {
-            let size = window.size();
-            let title = format!(
-                "({}x{})px, {} tiles, {:.1}ms",
-                size.0,
-                size.1,
-                state.color_buffer.tiles_x() * state.color_buffer.tiles_y(),
-                state.dt.as_secs_f32() * 1000.0
-            );
-            window.set_title(&title).map_err(|e| e.to_string())?;
-
             // Update the framebuffer size if required
+            let size = window.size();
             if state.color_buffer.width() != size.0 as u16 || state.color_buffer.height() != size.1 as u16 {
                 state.color_buffer = TiledBuffer::<u32, 64, 64>::new(size.0 as u16, size.1 as u16);
                 state.depth_buffer = TiledBuffer::<u16, 64, 64>::new(size.0 as u16, size.1 as u16);
@@ -364,9 +371,24 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.timestamp = Instant::now();
             render(&mut state);
 
+            state.rasterizer_stats = state.rasterizer.statistics().smoothed(5, state.rasterizer_stats);
+
             if (state.timestamp - state.last_printout).as_secs() > 2 {
                 state.last_printout = state.timestamp;
                 profiler.print();
+
+                let title = format!(
+                    "({}x{})px, {} tiles, tri_comm: {}, tri_sched: {}, tri_binn: {}, rast_frags: {}, FPS: {:.0}",
+                    size.0,
+                    size.1,
+                    state.color_buffer.tiles_x() * state.color_buffer.tiles_y(),
+                    state.rasterizer_stats.committed_triangles,
+                    state.rasterizer_stats.scheduled_triangles,
+                    state.rasterizer_stats.binned_triangles,
+                    state.rasterizer_stats.fragments_drawn,
+                    1.0 / state.dt.as_secs_f32()
+                );
+                window.set_title(&title).map_err(|e| e.to_string())?;
             }
         }
 

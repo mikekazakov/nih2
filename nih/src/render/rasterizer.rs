@@ -2,9 +2,7 @@ use super::super::math::*;
 use super::*;
 use arrayvec::ArrayVec;
 use std::cmp::{max, min};
-use std::ops::AddAssign;
-// use arrayvec::ArrayVec;
-// use std::mem::swap;
+use std::ops::Add;
 use std::ptr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +43,65 @@ struct Tile {
     local_viewport: Viewport,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RasterizerStatistics {
+    // The number of triangles that were requested to be rasterized.
+    pub committed_triangles: usize,
+
+    // The number of triangles that were scheduled for rasterization after culling and clipping.
+    pub scheduled_triangles: usize,
+
+    // The number of triangles rasterized across all tiles.
+    // (the same triangle can be rasterized multiple times if it is visible in multiple tiles)
+    pub binned_triangles: usize,
+
+    // The number of factual rasterized pixels.
+    // Gathered only in Debug builds.
+    pub fragments_drawn: usize,
+}
+
+impl RasterizerStatistics {
+    pub fn new() -> Self {
+        Self { committed_triangles: 0, scheduled_triangles: 0, binned_triangles: 0, fragments_drawn: 0 }
+    }
+
+    pub fn smoothed(&self, alpha: usize, prev_smooth: RasterizerStatistics) -> Self {
+        assert!(alpha <= 100);
+        let alpha1 = 100 - alpha;
+        let smooth = |curr: usize, prev: usize| ((alpha * curr) + (alpha1 * prev)) / 100;
+        RasterizerStatistics {
+            committed_triangles: smooth(self.committed_triangles, prev_smooth.committed_triangles),
+            scheduled_triangles: smooth(self.scheduled_triangles, prev_smooth.scheduled_triangles),
+            binned_triangles: smooth(self.binned_triangles, prev_smooth.binned_triangles),
+            fragments_drawn: smooth(self.fragments_drawn, prev_smooth.fragments_drawn),
+        }
+    }
+}
+
+impl Default for RasterizerStatistics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PerTileStatistics {
+    pub fragments_drawn: usize,
+}
+
+impl Default for PerTileStatistics {
+    fn default() -> Self {
+        Self { fragments_drawn: 0 }
+    }
+}
+
+impl Add for PerTileStatistics {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self { fragments_drawn: self.fragments_drawn + other.fragments_drawn }
+    }
+}
+
 pub struct Rasterizer {
     viewport: Viewport,
     viewport_scale: ViewportScale,
@@ -52,6 +109,7 @@ pub struct Rasterizer {
     tiles: Vec<Tile>,
     tiles_x: u16,
     tiles_y: u16,
+    stats: RasterizerStatistics,
 }
 
 impl Default for Tile {
@@ -72,6 +130,7 @@ impl Rasterizer {
             tiles: Vec::new(),
             tiles_x: 1,
             tiles_y: 1,
+            stats: RasterizerStatistics::new(),
         };
     }
 
@@ -103,6 +162,7 @@ impl Rasterizer {
         self.viewport = viewport;
         self.viewport_scale = ViewportScale::new(viewport);
         self.vertices.clear();
+        self.stats = RasterizerStatistics::new();
     }
 
     pub fn commit(&mut self, command: &RasterizationCommand) {
@@ -116,6 +176,8 @@ impl Rasterizer {
         if input_triangles_num == 0 {
             return;
         }
+
+        self.stats.committed_triangles += input_triangles_num;
 
         let view_projection = command.projection * command.view;
         let normal_matrix = command.model.as_mat33().inverse().transpose();
@@ -172,6 +234,9 @@ impl Rasterizer {
                 input_vertices[2].tex_coord = command.tex_coords[i2];
             }
 
+            // TODO: cull earlier????
+            // Why try clipping the triangle if it's not visible?
+
             let clipped_vertices = clip_triangle(&input_vertices);
             if clipped_vertices.is_empty() {
                 continue;
@@ -208,6 +273,8 @@ impl Rasterizer {
         }
 
         if scheduled_vertices_start != self.vertices.len() {
+            self.stats.scheduled_triangles += (self.vertices.len() - scheduled_vertices_start) / 3;
+
             let xmin = self.viewport.xmin as u32;
             let ymin = self.viewport.ymin as u32;
             for vert_idx in (scheduled_vertices_start..self.vertices.len()).step_by(3) {
@@ -227,7 +294,8 @@ impl Rasterizer {
                 for ind_y in ind_ymin..=ind_ymax {
                     for ind_x in ind_xmin..=ind_xmax {
                         let tile = &mut self.tiles[ind_y as usize * self.tiles_x as usize + ind_x as usize];
-                        tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 })
+                        tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 });
+                        self.stats.binned_triangles += 1;
                     }
                 }
             }
@@ -242,6 +310,7 @@ impl Rasterizer {
         struct Job {
             framebuffer_tile: FramebufferTile,
             render_tile: *const Tile,
+            statistics: PerTileStatistics,
         }
         unsafe impl Send for Job {}
         unsafe impl Sync for Job {}
@@ -252,7 +321,7 @@ impl Rasterizer {
                 let idx = (y * self.tiles_x + x) as usize;
                 let render_tile: *const Tile = &mut self.tiles[idx];
                 let framebuffer_tile = framebuffer.tile(x, y);
-                jobs.push(Job { framebuffer_tile, render_tile: render_tile });
+                jobs.push(Job { framebuffer_tile, render_tile: render_tile, statistics: PerTileStatistics::default() });
             }
         }
         use rayon::prelude::*;
@@ -269,15 +338,21 @@ impl Rasterizer {
                 tile_verts.push(vertices[tri.tri_start as usize + 2]);
 
                 if tile_verts.is_full() {
-                    self.draw_triangles_dispatch(&mut job.framebuffer_tile, viewport, &tile_verts);
+                    let call_stats = self.draw_triangles_dispatch(&mut job.framebuffer_tile, viewport, &tile_verts);
+                    job.statistics = job.statistics + call_stats;
                     tile_verts.clear();
                 }
             }
 
             if !tile_verts.is_empty() {
-                self.draw_triangles_dispatch(&mut job.framebuffer_tile, viewport, &tile_verts);
+                let call_stats = self.draw_triangles_dispatch(&mut job.framebuffer_tile, viewport, &tile_verts);
+                job.statistics = job.statistics + call_stats;
             }
         });
+
+        for job in jobs {
+            self.stats.fragments_drawn += job.statistics.fragments_drawn;
+        }
     }
 
     // fn idx_to_color_hash(mut x: u32) -> u32 {
@@ -317,7 +392,7 @@ impl Rasterizer {
         framebuffer: &mut FramebufferTile,
         local_viewport: Viewport,
         vertices: &[Vertex],
-    ) {
+    ) -> PerTileStatistics {
         let has_color = framebuffer.color_buffer.is_some();
         let has_depth = framebuffer.depth_buffer.is_some();
         let has_normal = framebuffer.normal_buffer.is_some();
@@ -338,7 +413,7 @@ impl Rasterizer {
         framebuffer: &mut FramebufferTile,
         local_viewport: Viewport,
         vertices: &[Vertex],
-    ) {
+    ) -> PerTileStatistics {
         assert!(local_viewport.xmin >= framebuffer.origin_x());
         assert!(local_viewport.xmax >= framebuffer.origin_x());
         assert!(local_viewport.ymin >= framebuffer.origin_y());
@@ -346,9 +421,10 @@ impl Rasterizer {
         debug_assert_eq!(HAS_COLOR_BUFFER, framebuffer.color_buffer.is_some());
         debug_assert_eq!(HAS_DEPTH_BUFFER, framebuffer.depth_buffer.is_some());
         debug_assert_eq!(HAS_NORMAL_BUFFER, framebuffer.normal_buffer.is_some());
+        let mut statistics = PerTileStatistics::default();
         let triangles_num = vertices.len() / 3;
         if triangles_num == 0 {
-            return;
+            return statistics;
         }
 
         let tile_origin = Vec2::new(framebuffer.origin_x() as f32, framebuffer.origin_y() as f32);
@@ -604,6 +680,10 @@ impl Rasterizer {
                                     );
                                 }
                             }
+
+                            if cfg!(debug_assertions) {
+                                statistics.fragments_drawn += 1;
+                            }
                         }
                     }
                     edge0_24x8 += edge0_24x8_dx;
@@ -661,6 +741,11 @@ impl Rasterizer {
                 }
             }
         }
+        statistics
+    }
+
+    pub fn statistics(&self) -> RasterizerStatistics {
+        self.stats
     }
 }
 
