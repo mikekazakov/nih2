@@ -272,31 +272,32 @@ impl Rasterizer {
             }
         }
 
-        if scheduled_vertices_start != self.vertices.len() {
-            self.stats.scheduled_triangles += (self.vertices.len() - scheduled_vertices_start) / 3;
+        if scheduled_vertices_start == self.vertices.len() {
+            return;
+        }
+        self.stats.scheduled_triangles += (self.vertices.len() - scheduled_vertices_start) / 3;
 
-            let xmin = self.viewport.xmin as u32;
-            let ymin = self.viewport.ymin as u32;
-            for vert_idx in (scheduled_vertices_start..self.vertices.len()).step_by(3) {
-                let v0 = &self.vertices[vert_idx + 0];
-                let v1 = &self.vertices[vert_idx + 1];
-                let v2 = &self.vertices[vert_idx + 2];
-                let v_xmin = v0.position.x.min(v1.position.x).min(v2.position.x) as u32;
-                let v_xmax = v0.position.x.max(v1.position.x).max(v2.position.x) as u32;
-                let v_ymin = v0.position.y.min(v1.position.y).min(v2.position.y) as u32;
-                let v_ymax = v0.position.y.max(v1.position.y).max(v2.position.y) as u32;
-                // TODO: add less crude discarding by running simple edge functions
-                // TODO: check if this min() is required
-                let ind_xmin = ((v_xmin - xmin) / Self::TILE_WIDTH as u32).min(self.tiles_x as u32 - 1);
-                let ind_ymin = ((v_ymin - ymin) / Self::TILE_HEIGHT as u32).min(self.tiles_y as u32 - 1);
-                let ind_xmax = ((v_xmax - xmin) / Self::TILE_WIDTH as u32).min(self.tiles_x as u32 - 1);
-                let ind_ymax = ((v_ymax - ymin) / Self::TILE_HEIGHT as u32).min(self.tiles_y as u32 - 1);
-                for ind_y in ind_ymin..=ind_ymax {
-                    for ind_x in ind_xmin..=ind_xmax {
-                        let tile = &mut self.tiles[ind_y as usize * self.tiles_x as usize + ind_x as usize];
-                        tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 });
-                        self.stats.binned_triangles += 1;
-                    }
+        let xmin = self.viewport.xmin as u32;
+        let ymin = self.viewport.ymin as u32;
+        for vert_idx in (scheduled_vertices_start..self.vertices.len()).step_by(3) {
+            let v0 = &self.vertices[vert_idx + 0];
+            let v1 = &self.vertices[vert_idx + 1];
+            let v2 = &self.vertices[vert_idx + 2];
+            let v_xmin = v0.position.x.min(v1.position.x).min(v2.position.x) as u32;
+            let v_xmax = v0.position.x.max(v1.position.x).max(v2.position.x) as u32;
+            let v_ymin = v0.position.y.min(v1.position.y).min(v2.position.y) as u32;
+            let v_ymax = v0.position.y.max(v1.position.y).max(v2.position.y) as u32;
+            // TODO: add less crude discarding by running simple edge functions
+            // TODO: check if this min() is required
+            let ind_xmin = ((v_xmin - xmin) / Self::TILE_WIDTH as u32).min(self.tiles_x as u32 - 1);
+            let ind_ymin = ((v_ymin - ymin) / Self::TILE_HEIGHT as u32).min(self.tiles_y as u32 - 1);
+            let ind_xmax = ((v_xmax - xmin) / Self::TILE_WIDTH as u32).min(self.tiles_x as u32 - 1);
+            let ind_ymax = ((v_ymax - ymin) / Self::TILE_HEIGHT as u32).min(self.tiles_y as u32 - 1);
+            for ind_y in ind_ymin..=ind_ymax {
+                for ind_x in ind_xmin..=ind_xmax {
+                    let tile = &mut self.tiles[ind_y as usize * self.tiles_x as usize + ind_x as usize];
+                    tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 });
+                    self.stats.binned_triangles += 1;
                 }
             }
         }
@@ -1264,44 +1265,44 @@ mod tests {
     }
 
     #[rstest]
-    #[case(256, 256, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/256x256_0.png")]
-    #[case(256, 256, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/256x256_1.png")]
-    #[case(256, 256, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/256x256_2.png")]
-    #[case(256, 256, Vec2::new(-0.75, 0.75), Vec2::new(-0.75, 0.25), Vec2::new(0.75, 0.5), "rasterizer/tiling/256x256_3.png")]
-    #[case(256, 256, Vec2::new(-0.75, -0.25), Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.5), "rasterizer/tiling/256x256_4.png")]
-    #[case(256, 256, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/256x256_5.png")]
-    #[case(256, 256, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/256x256_6.png")]
-    #[case(256, 256, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/256x256_7.png")]
-    #[case(256, 256, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/256x256_8.png")]
-    #[case(141, 79, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/141x79_0.png")]
-    #[case(141, 79, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/141x79_1.png")]
-    #[case(141, 79, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/141x79_2.png")]
-    #[case(141, 79, Vec2::new(-0.75, 0.75), Vec2::new(-0.75, 0.25), Vec2::new(0.75, 0.5), "rasterizer/tiling/141x79_3.png")]
-    #[case(141, 79, Vec2::new(-0.75, -0.25), Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.5), "rasterizer/tiling/141x79_4.png")]
-    #[case(141, 79, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/141x79_5.png")]
-    #[case(141, 79, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/141x79_6.png")]
-    #[case(141, 79, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/141x79_7.png")]
-    #[case(141, 79, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/141x79_8.png")]
-    #[case(65, 65, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/65x65_0.png")]
-    #[case(65, 65, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/65x65_1.png")]
-    #[case(65, 65, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/65x65_2.png")]
-    #[case(65, 65, Vec2::new(-0.75, 0.75), Vec2::new(-0.75, 0.25), Vec2::new(0.75, 0.5), "rasterizer/tiling/65x65_3.png")]
-    #[case(65, 65, Vec2::new(-0.75, -0.25), Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.5), "rasterizer/tiling/65x65_4.png")]
-    #[case(65, 65, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/65x65_5.png")]
-    #[case(65, 65, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/65x65_6.png")]
-    #[case(65, 65, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/65x65_7.png")]
-    #[case(65, 65, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/65x65_8.png")]
-    #[case(1024, 1024, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/1024x1024_0.png")]
-    #[case(1024, 1024, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/1024x1024_1.png")]
-    #[case(1024, 1024, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/1024x1024_2.png")]
-    #[case(1024, 1024, Vec2::new(-0.75, 0.75), Vec2::new(-0.75, 0.25), Vec2::new(0.75, 0.5), "rasterizer/tiling/1024x1024_3.png")]
-    #[case(1024, 1024, Vec2::new(-0.75, -0.25), Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.5), "rasterizer/tiling/1024x1024_4.png")]
-    #[case(1024, 1024, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/1024x1024_5.png")]
-    #[case(1024, 1024, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/1024x1024_6.png")]
+    #[case(256, 256, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/256x256_00.png")]
+    #[case(256, 256, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/256x256_01.png")]
+    #[case(256, 256, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/256x256_02.png")]
+    #[case(256, 256, Vec2::new(-0.75, 0.75), Vec2::new(-0.75, 0.25), Vec2::new(0.75, 0.5), "rasterizer/tiling/256x256_03.png")]
+    #[case(256, 256, Vec2::new(-0.75, -0.25), Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.5), "rasterizer/tiling/256x256_04.png")]
+    #[case(256, 256, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/256x256_05.png")]
+    #[case(256, 256, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/256x256_06.png")]
+    #[case(256, 256, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/256x256_07.png")]
+    #[case(256, 256, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/256x256_08.png")]
+    #[case(141, 79, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/141x79_00.png")]
+    #[case(141, 79, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/141x79_01.png")]
+    #[case(141, 79, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/141x79_02.png")]
+    #[case(141, 79, Vec2::new(-0.75, 0.75), Vec2::new(-0.75, 0.25), Vec2::new(0.75, 0.5), "rasterizer/tiling/141x79_03.png")]
+    #[case(141, 79, Vec2::new(-0.75, -0.25), Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.5), "rasterizer/tiling/141x79_04.png")]
+    #[case(141, 79, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/141x79_05.png")]
+    #[case(141, 79, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/141x79_06.png")]
+    #[case(141, 79, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/141x79_07.png")]
+    #[case(141, 79, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/141x79_08.png")]
+    #[case(65, 65, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/65x65_00.png")]
+    #[case(65, 65, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/65x65_01.png")]
+    #[case(65, 65, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/65x65_02.png")]
+    #[case(65, 65, Vec2::new(-0.75, 0.75), Vec2::new(-0.75, 0.25), Vec2::new(0.75, 0.5), "rasterizer/tiling/65x65_03.png")]
+    #[case(65, 65, Vec2::new(-0.75, -0.25), Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.5), "rasterizer/tiling/65x65_04.png")]
+    #[case(65, 65, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/65x65_05.png")]
+    #[case(65, 65, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/65x65_06.png")]
+    #[case(65, 65, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/65x65_07.png")]
+    #[case(65, 65, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/65x65_08.png")]
+    #[case(1024, 1024, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/1024x1024_00.png")]
+    #[case(1024, 1024, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/1024x1024_01.png")]
+    #[case(1024, 1024, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/1024x1024_02.png")]
+    #[case(1024, 1024, Vec2::new(-0.75, 0.75), Vec2::new(-0.75, 0.25), Vec2::new(0.75, 0.5), "rasterizer/tiling/1024x1024_03.png")]
+    #[case(1024, 1024, Vec2::new(-0.75, -0.25), Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.5), "rasterizer/tiling/1024x1024_04.png")]
+    #[case(1024, 1024, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.0), "rasterizer/tiling/1024x1024_05.png")]
+    #[case(1024, 1024, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/1024x1024_06.png")]
     // Currently fails because of a 1-pixel hole
-    // #[case(1024, 1024, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/1024x1024_7.png")]
+    // #[case(1024, 1024, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/1024x1024_07.png")]
     // Currently fails because of a 1-pixel hole
-    // #[case(1024, 1024, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/1024x1024_8.png")]
+    // #[case(1024, 1024, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/1024x1024_08.png")]
     fn tiling(
         #[case] width: u16,
         #[case] height: u16,
