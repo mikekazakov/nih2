@@ -34,13 +34,23 @@ pub struct RasterizationCommand<'a> {
     pub color: Vec4,
 }
 
+#[derive(Debug, Clone, Copy)]
 struct ScheduledTriangle {
     tri_start: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TileBinningBounds {
+    xmin_24_8: i32,
+    ymin_24_8: i32,
+    xmax_24_8: i32,
+    ymax_24_8: i32,
 }
 
 struct Tile {
     triangles: Vec<ScheduledTriangle>,
     local_viewport: Viewport,
+    binning_bounds: TileBinningBounds,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -114,7 +124,11 @@ pub struct Rasterizer {
 
 impl Default for Tile {
     fn default() -> Self {
-        Self { triangles: Vec::new(), local_viewport: Viewport::new(0, 0, 1, 1) }
+        Self {
+            triangles: Vec::new(),
+            local_viewport: Viewport::new(0, 0, 1, 1),
+            binning_bounds: TileBinningBounds { xmin_24_8: 0, ymin_24_8: 0, xmax_24_8: 0, ymax_24_8: 0 },
+        }
     }
 }
 
@@ -155,6 +169,12 @@ impl Rasterizer {
                     ymin: viewport.ymin + y as u16 * Self::TILE_HEIGHT as u16,
                     xmax: (viewport.xmin + (x as u16 + 1) * Self::TILE_WIDTH as u16).min(viewport.xmax),
                     ymax: (viewport.ymin + (y as u16 + 1) * Self::TILE_HEIGHT as u16).min(viewport.ymax),
+                };
+                tile.binning_bounds = TileBinningBounds {
+                    xmin_24_8: (x * Self::TILE_WIDTH) as i32 * 256 + 127,
+                    ymin_24_8: (y * Self::TILE_HEIGHT) as i32 * 256 + 127,
+                    xmax_24_8: (x * Self::TILE_WIDTH + Self::TILE_WIDTH - 1) as i32 * 256 + 127,
+                    ymax_24_8: (y * Self::TILE_HEIGHT + Self::TILE_HEIGHT - 1) as i32 * 256 + 127,
                 };
             }
         }
@@ -277,6 +297,7 @@ impl Rasterizer {
         }
         self.stats.scheduled_triangles += (self.vertices.len() - scheduled_vertices_start) / 3;
 
+        // Now bin each scheduled triangle
         let xmin = self.viewport.xmin as u32;
         let ymin = self.viewport.ymin as u32;
         for vert_idx in (scheduled_vertices_start..self.vertices.len()).step_by(3) {
@@ -293,11 +314,69 @@ impl Rasterizer {
             let ind_ymin = ((v_ymin - ymin) / Self::TILE_HEIGHT as u32).min(self.tiles_y as u32 - 1);
             let ind_xmax = ((v_xmax - xmin) / Self::TILE_WIDTH as u32).min(self.tiles_x as u32 - 1);
             let ind_ymax = ((v_ymax - ymin) / Self::TILE_HEIGHT as u32).min(self.tiles_y as u32 - 1);
-            for ind_y in ind_ymin..=ind_ymax {
-                for ind_x in ind_xmin..=ind_xmax {
-                    let tile = &mut self.tiles[ind_y as usize * self.tiles_x as usize + ind_x as usize];
-                    tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 });
-                    self.stats.binned_triangles += 1;
+            if ind_xmin == ind_xmax || ind_ymin == ind_ymax {
+                // The triangle is fully contained in a single tile or it a horizontal or vertical line, bin it in the appropriate tiles.
+                // No additional overlap checks are required.
+                for ind_y in ind_ymin..=ind_ymax {
+                    for ind_x in ind_xmin..=ind_xmax {
+                        let tile = &mut self.tiles[ind_y as usize * self.tiles_x as usize + ind_x as usize];
+                        tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 });
+                        self.stats.binned_triangles += 1;
+                    }
+                }
+            } else {
+                // The triangle spans 2x2 or more tiles, bin in the appropriate tiles, but only after running simple edge functions check
+                let iv0_x_24_8 = (v0.position.x * 256.0).round() as i32;
+                let iv0_y_24_8 = (v0.position.y * 256.0).round() as i32;
+                let iv1_x_24_8 = (v1.position.x * 256.0).round() as i32;
+                let iv1_y_24_8 = (v1.position.y * 256.0).round() as i32;
+                let iv2_x_24_8 = (v2.position.x * 256.0).round() as i32;
+                let iv2_y_24_8 = (v2.position.y * 256.0).round() as i32;
+                let iv01_x_24_8 = iv1_x_24_8 - iv0_x_24_8;
+                let iv01_y_24_8 = iv1_y_24_8 - iv0_y_24_8;
+                let iv12_x_24_8 = iv2_x_24_8 - iv1_x_24_8;
+                let iv12_y_24_8 = iv2_y_24_8 - iv1_y_24_8;
+                let iv20_x_24_8 = iv0_x_24_8 - iv2_x_24_8;
+                let iv20_y_24_8 = iv0_y_24_8 - iv2_y_24_8;
+                let is_tile_fully_outside = |tile_bounds: TileBinningBounds| {
+                    let iv1_xmin_24_8 = tile_bounds.xmin_24_8 - iv1_x_24_8;
+                    let iv1_ymin_24_8 = tile_bounds.ymin_24_8 - iv1_y_24_8;
+                    let iv1_xmax_24_8 = tile_bounds.xmax_24_8 - iv1_x_24_8;
+                    let iv1_ymax_24_8 = tile_bounds.ymax_24_8 - iv1_y_24_8;
+                    let iv2_xmin_24_8 = tile_bounds.xmin_24_8 - iv2_x_24_8;
+                    let iv2_ymin_24_8 = tile_bounds.ymin_24_8 - iv2_y_24_8;
+                    let iv2_xmax_24_8 = tile_bounds.xmax_24_8 - iv2_x_24_8;
+                    let iv2_ymax_24_8 = tile_bounds.ymax_24_8 - iv2_y_24_8;
+                    let iv0_xmin_24_8 = tile_bounds.xmin_24_8 - iv0_x_24_8;
+                    let iv0_ymin_24_8 = tile_bounds.ymin_24_8 - iv0_y_24_8;
+                    let iv0_xmax_24_8 = tile_bounds.xmax_24_8 - iv0_x_24_8;
+                    let iv0_ymax_24_8 = tile_bounds.ymax_24_8 - iv0_y_24_8;
+                    let e0_lb = iv12_x_24_8 as i64 * iv1_ymin_24_8 as i64 - iv12_y_24_8 as i64 * iv1_xmin_24_8 as i64;
+                    let e0_rb = iv12_x_24_8 as i64 * iv1_ymin_24_8 as i64 - iv12_y_24_8 as i64 * iv1_xmax_24_8 as i64;
+                    let e0_lt = iv12_x_24_8 as i64 * iv1_ymax_24_8 as i64 - iv12_y_24_8 as i64 * iv1_xmin_24_8 as i64;
+                    let e0_rt = iv12_x_24_8 as i64 * iv1_ymax_24_8 as i64 - iv12_y_24_8 as i64 * iv1_xmax_24_8 as i64;
+                    let e1_lb = iv20_x_24_8 as i64 * iv2_ymin_24_8 as i64 - iv20_y_24_8 as i64 * iv2_xmin_24_8 as i64;
+                    let e1_rb = iv20_x_24_8 as i64 * iv2_ymin_24_8 as i64 - iv20_y_24_8 as i64 * iv2_xmax_24_8 as i64;
+                    let e1_lt = iv20_x_24_8 as i64 * iv2_ymax_24_8 as i64 - iv20_y_24_8 as i64 * iv2_xmin_24_8 as i64;
+                    let e1_rt = iv20_x_24_8 as i64 * iv2_ymax_24_8 as i64 - iv20_y_24_8 as i64 * iv2_xmax_24_8 as i64;
+                    let e2_lb = iv01_x_24_8 as i64 * iv0_ymin_24_8 as i64 - iv01_y_24_8 as i64 * iv0_xmin_24_8 as i64;
+                    let e2_rb = iv01_x_24_8 as i64 * iv0_ymin_24_8 as i64 - iv01_y_24_8 as i64 * iv0_xmax_24_8 as i64;
+                    let e2_lt = iv01_x_24_8 as i64 * iv0_ymax_24_8 as i64 - iv01_y_24_8 as i64 * iv0_xmin_24_8 as i64;
+                    let e2_rt = iv01_x_24_8 as i64 * iv0_ymax_24_8 as i64 - iv01_y_24_8 as i64 * iv0_xmax_24_8 as i64;
+                    (e0_lb < 0 && e0_rb < 0 && e0_lt < 0 && e0_rt < 0)
+                        || (e1_lb < 0 && e1_rb < 0 && e1_lt < 0 && e1_rt < 0)
+                        || (e2_lb < 0 && e2_rb < 0 && e2_lt < 0 && e2_rt < 0)
+                };
+
+                for ind_y in ind_ymin..=ind_ymax {
+                    for ind_x in ind_xmin..=ind_xmax {
+                        let tile = &mut self.tiles[ind_y as usize * self.tiles_x as usize + ind_x as usize];
+                        if is_tile_fully_outside(tile.binning_bounds) {
+                            continue;
+                        }
+                        tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 });
+                        self.stats.binned_triangles += 1;
+                    }
                 }
             }
         }
@@ -1274,6 +1353,8 @@ mod tests {
     #[case(256, 256, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/256x256_06.png")]
     #[case(256, 256, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/256x256_07.png")]
     #[case(256, 256, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/256x256_08.png")]
+    #[case(256, 256, Vec2::new(0.25, 0.75), Vec2::new(-0.75, -0.25), Vec2::new(-0.25, -0.25), "rasterizer/tiling/256x256_09.png")]
+    #[case(256, 256, Vec2::new(-0.85, 0.75), Vec2::new(0.65, -0.35), Vec2::new(0.85, -0.25), "rasterizer/tiling/256x256_10.png")]
     #[case(141, 79, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/141x79_00.png")]
     #[case(141, 79, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/141x79_01.png")]
     #[case(141, 79, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/141x79_02.png")]
@@ -1283,6 +1364,8 @@ mod tests {
     #[case(141, 79, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/141x79_06.png")]
     #[case(141, 79, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/141x79_07.png")]
     #[case(141, 79, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/141x79_08.png")]
+    #[case(141, 79, Vec2::new(0.25, 0.75), Vec2::new(-0.75, -0.25), Vec2::new(-0.25, -0.25), "rasterizer/tiling/141x79_09.png")]
+    #[case(141, 79, Vec2::new(-0.85, 0.75), Vec2::new(0.65, -0.35), Vec2::new(0.85, -0.25), "rasterizer/tiling/141x79_10.png")]
     #[case(65, 65, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/65x65_00.png")]
     #[case(65, 65, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/65x65_01.png")]
     #[case(65, 65, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/65x65_02.png")]
@@ -1292,6 +1375,8 @@ mod tests {
     #[case(65, 65, Vec2::new(-1.0, 0.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/65x65_06.png")]
     #[case(65, 65, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/65x65_07.png")]
     #[case(65, 65, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/65x65_08.png")]
+    #[case(65, 65, Vec2::new(0.25, 0.75), Vec2::new(-0.75, -0.25), Vec2::new(-0.25, -0.25), "rasterizer/tiling/65x65_09.png")]
+    #[case(65, 65, Vec2::new(-0.85, 0.75), Vec2::new(0.65, -0.35), Vec2::new(0.85, -0.25), "rasterizer/tiling/65x65_10.png")]
     #[case(1024, 1024, Vec2::new(0.0, 0.5), Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), "rasterizer/tiling/1024x1024_00.png")]
     #[case(1024, 1024, Vec2::new(-0.5, 0.75), Vec2::new(-0.75, -0.75), Vec2::new(-0.25, -0.75), "rasterizer/tiling/1024x1024_01.png")]
     #[case(1024, 1024, Vec2::new(0.5, 0.75), Vec2::new(0.25, -0.75), Vec2::new(0.75, -0.75), "rasterizer/tiling/1024x1024_02.png")]
@@ -1303,6 +1388,8 @@ mod tests {
     // #[case(1024, 1024, Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -2.0), Vec2::new(1.0, 1.0), "rasterizer/tiling/1024x1024_07.png")]
     // Currently fails because of a 1-pixel hole
     // #[case(1024, 1024, Vec2::new(1.0, 1.25), Vec2::new(-1.0, 0.0), Vec2::new(1.0, -1.25), "rasterizer/tiling/1024x1024_08.png")]
+    #[case(1024, 1024, Vec2::new(0.25, 0.75), Vec2::new(-0.75, -0.25), Vec2::new(-0.25, -0.25), "rasterizer/tiling/1024x1024_09.png")]
+    #[case(1024, 1024, Vec2::new(-0.85, 0.75), Vec2::new(0.65, -0.35), Vec2::new(0.85, -0.25), "rasterizer/tiling/1024x1024_10.png")]
     fn tiling(
         #[case] width: u16,
         #[case] height: u16,
@@ -1425,9 +1512,9 @@ mod tests_binning {
             BinningTC { mask: 0b0101, v0: Vec2::new(-0.9, 0.9), v1: Vec2::new(-0.9, -0.8), v2: Vec2::new(-0.8, 0.9) },
             BinningTC { mask: 0b1010, v0: Vec2::new(0.8, 0.9), v1: Vec2::new(0.8, -0.8), v2: Vec2::new(0.9, 0.9) },
             BinningTC { mask: 0b1100, v0: Vec2::new(-0.9, -0.8), v1: Vec2::new(-0.9, -0.9), v2: Vec2::new(0.8, -0.8) },
-            // 4 tiles (currently very crude)
-            BinningTC { mask: 0b1111, v0: Vec2::new(-0.9, 0.9), v1: Vec2::new(-0.9, -0.8), v2: Vec2::new(0.1, 0.9) },
-            BinningTC { mask: 0b1111, v0: Vec2::new(-2.0, 2.0), v1: Vec2::new(-2.0, -2.0), v2: Vec2::new(2.0, 2.0) },
+            // 3 tiles
+            BinningTC { mask: 0b0111, v0: Vec2::new(-0.9, 0.9), v1: Vec2::new(-0.9, -0.8), v2: Vec2::new(0.1, 0.9) },
+            BinningTC { mask: 0b0111, v0: Vec2::new(-2.0, 2.0), v1: Vec2::new(-2.0, -2.0), v2: Vec2::new(2.0, 2.0) },
         ];
         for tc in test_cases {
             let mut rasterizer = Rasterizer::new();
@@ -1444,7 +1531,7 @@ mod tests_binning {
                 | ((!rasterizer.tiles[1].triangles.is_empty()) as u32) << 1
                 | ((!rasterizer.tiles[2].triangles.is_empty()) as u32) << 2
                 | ((!rasterizer.tiles[3].triangles.is_empty()) as u32) << 3;
-            assert!(mask == tc.mask);
+            assert_eq!(mask, tc.mask);
         }
     }
 }

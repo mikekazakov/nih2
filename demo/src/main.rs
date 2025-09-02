@@ -404,7 +404,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else if state.display_mode == DisplayMode::Depth {
                 blit_depth_to_window(&state.depth_buffer.as_flat_buffer(), &window, &event_pump);
             } else if state.display_mode == DisplayMode::Normal {
-                blit_normals_to_window(&mut state.normal_buffer.as_flat_buffer(), &window, &event_pump);
+                let mut flat = state.normal_buffer.as_flat_buffer();
+                if state.overlay_tiles {
+                    overlay_tiles(&mut flat);
+                }
+                blit_normals_to_window(&mut flat, &window, &event_pump);
             }
         }
     }
