@@ -29,6 +29,8 @@ impl Default for Mip {
     }
 }
 
+// #[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct Texture {
     pub texels: Vec<u8>,
     pub count: u32,

@@ -19,7 +19,7 @@ impl Sampler {
         let mip0_index = ((lod as f32).floor() as i32).clamp(0, mips as i32 - 1);
         let mip0 = &texture.mips[mip0_index as usize];
         let texels0 = unsafe { texture.texels.as_ptr().add(mip0.offset as usize) };
-        let sample_function = match (mip0.width) {
+        let sample_function = match mip0.width {
             1 => sample::<1>,
             2 => sample::<2>,
             4 => sample::<4>,
@@ -41,6 +41,16 @@ impl Sampler {
     pub fn sample(&self, u: f32, v: f32) -> RGBA {
         (self.sample_function)(self.texels0, u, v)
     }
+}
+
+impl Default for Sampler {
+    fn default() -> Self {
+        Sampler { texels0: std::ptr::null(), sample_function: noop_sample }
+    }
+}
+
+fn noop_sample(texels: *const u8, u: f32, v: f32) -> RGBA {
+    RGBA::new(0, 0, 0, 255)
 }
 
 fn sample<const SIZE: u16>(texels: *const u8, u: f32, v: f32) -> RGBA {

@@ -17,7 +17,7 @@ pub enum CullMode {
     CCW,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RasterizationCommand<'a> {
     pub world_positions: &'a [Vec3],
     pub normals: &'a [Vec3],    // empty if absent, will be derived automatically
@@ -32,10 +32,20 @@ pub struct RasterizationCommand<'a> {
     pub projection: Mat44,
     pub culling: CullMode,
     pub color: Vec4,
+    pub texture: Option<std::sync::Arc<Texture>>,
+}
+
+#[derive(Debug, Clone)]
+struct ScheduledCommand {
+    texture: Option<std::sync::Arc<Texture>>,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct ScheduledTriangle {
+    // index of a rasterization command
+    cmd: u16,
+
+    // index of the triangle's first vertex
     tri_start: u16,
 }
 
@@ -70,52 +80,16 @@ pub struct RasterizerStatistics {
     pub fragments_drawn: usize,
 }
 
-impl RasterizerStatistics {
-    pub fn new() -> Self {
-        Self { committed_triangles: 0, scheduled_triangles: 0, binned_triangles: 0, fragments_drawn: 0 }
-    }
-
-    pub fn smoothed(&self, alpha: usize, prev_smooth: RasterizerStatistics) -> Self {
-        assert!(alpha <= 100);
-        let alpha1 = 100 - alpha;
-        let smooth = |curr: usize, prev: usize| ((alpha * curr) + (alpha1 * prev)) / 100;
-        RasterizerStatistics {
-            committed_triangles: smooth(self.committed_triangles, prev_smooth.committed_triangles),
-            scheduled_triangles: smooth(self.scheduled_triangles, prev_smooth.scheduled_triangles),
-            binned_triangles: smooth(self.binned_triangles, prev_smooth.binned_triangles),
-            fragments_drawn: smooth(self.fragments_drawn, prev_smooth.fragments_drawn),
-        }
-    }
-}
-
-impl Default for RasterizerStatistics {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 struct PerTileStatistics {
     pub fragments_drawn: usize,
-}
-
-impl Default for PerTileStatistics {
-    fn default() -> Self {
-        Self { fragments_drawn: 0 }
-    }
-}
-
-impl Add for PerTileStatistics {
-    type Output = Self;
-    fn add(self, other: Self) -> Self {
-        Self { fragments_drawn: self.fragments_drawn + other.fragments_drawn }
-    }
 }
 
 pub struct Rasterizer {
     viewport: Viewport,
     viewport_scale: ViewportScale,
     vertices: Vec<Vertex>,
+    commands: Vec<ScheduledCommand>,
     tiles: Vec<Tile>,
     tiles_x: u16,
     tiles_y: u16,
@@ -138,9 +112,10 @@ impl Rasterizer {
 
     pub fn new() -> Self {
         return Rasterizer {
-            viewport: Viewport::new(0, 0, 1, 1), //
+            viewport: Viewport::new(0, 0, 1, 1),
             viewport_scale: ViewportScale::default(),
-            vertices: Vec::new(), //
+            vertices: Vec::new(),
+            commands: Vec::new(),
             tiles: Vec::new(),
             tiles_x: 1,
             tiles_y: 1,
@@ -182,6 +157,7 @@ impl Rasterizer {
         self.viewport = viewport;
         self.viewport_scale = ViewportScale::new(viewport);
         self.vertices.clear();
+        self.commands.clear();
         self.stats = RasterizerStatistics::new();
     }
 
@@ -297,6 +273,13 @@ impl Rasterizer {
         }
         self.stats.scheduled_triangles += (self.vertices.len() - scheduled_vertices_start) / 3;
 
+        // Reuse the last command or create a new one
+        let required_scheduled_command = ScheduledCommand { texture: command.texture.clone() };
+        if self.commands.is_empty() || self.commands.last().unwrap() != &required_scheduled_command {
+            self.commands.push(required_scheduled_command);
+        }
+        let scheduled_command_index = (self.commands.len() - 1) as u16;
+
         // Now bin each scheduled triangle
         let xmin = self.viewport.xmin as u32;
         let ymin = self.viewport.ymin as u32;
@@ -320,7 +303,8 @@ impl Rasterizer {
                 for ind_y in ind_ymin..=ind_ymax {
                     for ind_x in ind_xmin..=ind_xmax {
                         let tile = &mut self.tiles[ind_y as usize * self.tiles_x as usize + ind_x as usize];
-                        tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 });
+                        tile.triangles
+                            .push(ScheduledTriangle { cmd: scheduled_command_index, tri_start: vert_idx as u16 });
                         self.stats.binned_triangles += 1;
                     }
                 }
@@ -374,7 +358,8 @@ impl Rasterizer {
                         if is_tile_fully_outside(tile.binning_bounds) {
                             continue;
                         }
-                        tile.triangles.push(ScheduledTriangle { tri_start: vert_idx as u16 });
+                        tile.triangles
+                            .push(ScheduledTriangle { cmd: scheduled_command_index, tri_start: vert_idx as u16 });
                         self.stats.binned_triangles += 1;
                     }
                 }
@@ -407,25 +392,41 @@ impl Rasterizer {
         use rayon::prelude::*;
         jobs.par_iter_mut().for_each(|job| {
             let render_tile = unsafe { &*job.render_tile };
+            if render_tile.triangles.is_empty() {
+                return;
+            }
+
             let viewport = render_tile.local_viewport;
             let vertices = &self.vertices;
 
             let mut tile_verts = ArrayVec::<Vertex, 384>::new(); // up to 128 triangles
+            let mut cmd_idx = render_tile.triangles.first().unwrap().cmd;
 
             for tri in &render_tile.triangles {
+                if tile_verts.is_full() || tri.cmd != cmd_idx {
+                    let call_stats = self.draw_triangles_dispatch(
+                        &mut job.framebuffer_tile,
+                        viewport,
+                        &tile_verts,
+                        &self.commands[cmd_idx as usize],
+                    );
+                    job.statistics = job.statistics + call_stats;
+                    tile_verts.clear();
+                    cmd_idx = tri.cmd;
+                }
+
                 tile_verts.push(vertices[tri.tri_start as usize + 0]);
                 tile_verts.push(vertices[tri.tri_start as usize + 1]);
                 tile_verts.push(vertices[tri.tri_start as usize + 2]);
-
-                if tile_verts.is_full() {
-                    let call_stats = self.draw_triangles_dispatch(&mut job.framebuffer_tile, viewport, &tile_verts);
-                    job.statistics = job.statistics + call_stats;
-                    tile_verts.clear();
-                }
             }
 
             if !tile_verts.is_empty() {
-                let call_stats = self.draw_triangles_dispatch(&mut job.framebuffer_tile, viewport, &tile_verts);
+                let call_stats = self.draw_triangles_dispatch(
+                    &mut job.framebuffer_tile,
+                    viewport,
+                    &tile_verts,
+                    &self.commands[cmd_idx as usize],
+                );
                 job.statistics = job.statistics + call_stats;
             }
         });
@@ -472,27 +473,44 @@ impl Rasterizer {
         framebuffer: &mut FramebufferTile,
         local_viewport: Viewport,
         vertices: &[Vertex],
+        command: &ScheduledCommand,
     ) -> PerTileStatistics {
+        type DrawFunction =
+            fn(&Rasterizer, &mut FramebufferTile, Viewport, &[Vertex], &ScheduledCommand) -> PerTileStatistics;
+        macro_rules! comb {
+            ( $( $($a:literal,)* $b:ty $(,$c:ty)* );+ ) => {
+                comb!(
+                    $( $($a,)* false $(,$c)* );+ ;
+                    $( $($a,)* true $(,$c)* );+
+                )
+            };
+            ( $( $($a:literal),+ );+ )                  => {
+                [$( Rasterizer::draw_triangles::<$($a),+>, )+]
+            };
+        }
+        const DRAW_FUNCTIONS: [DrawFunction; 16] = comb!(bool, bool, bool, bool);
         let has_color = framebuffer.color_buffer.is_some();
         let has_depth = framebuffer.depth_buffer.is_some();
         let has_normal = framebuffer.normal_buffer.is_some();
-        match (has_color, has_depth, has_normal) {
-            (false, false, false) => self.draw_triangles::<false, false, false>(framebuffer, local_viewport, vertices),
-            (true, false, false) => self.draw_triangles::<true, false, false>(framebuffer, local_viewport, vertices),
-            (false, true, false) => self.draw_triangles::<false, true, false>(framebuffer, local_viewport, vertices),
-            (false, false, true) => self.draw_triangles::<false, false, true>(framebuffer, local_viewport, vertices),
-            (true, true, false) => self.draw_triangles::<true, true, false>(framebuffer, local_viewport, vertices),
-            (true, false, true) => self.draw_triangles::<true, false, true>(framebuffer, local_viewport, vertices),
-            (false, true, true) => self.draw_triangles::<false, true, true>(framebuffer, local_viewport, vertices),
-            (true, true, true) => self.draw_triangles::<true, true, true>(framebuffer, local_viewport, vertices),
-        }
+        let has_texture = command.texture.is_some();
+        let idx = (has_color as usize) << 0
+            | (has_depth as usize) << 1
+            | (has_normal as usize) << 2
+            | (has_texture as usize) << 3;
+        DRAW_FUNCTIONS[idx](self, framebuffer, local_viewport, vertices, command)
     }
 
-    fn draw_triangles<const HAS_COLOR_BUFFER: bool, const HAS_DEPTH_BUFFER: bool, const HAS_NORMAL_BUFFER: bool>(
+    fn draw_triangles<
+        const HAS_COLOR_BUFFER: bool,
+        const HAS_DEPTH_BUFFER: bool,
+        const HAS_NORMAL_BUFFER: bool,
+        const HAS_TEXTURE: bool,
+    >(
         &self,
         framebuffer: &mut FramebufferTile,
         local_viewport: Viewport,
         vertices: &[Vertex],
+        command: &ScheduledCommand,
     ) -> PerTileStatistics {
         assert!(local_viewport.xmin >= framebuffer.origin_x());
         assert!(local_viewport.xmax >= framebuffer.origin_x());
@@ -610,6 +628,16 @@ impl Rasterizer {
                 Vec3::new(v0.normal.y * v0.position.w, v1.normal.y * v1.position.w, v2.normal.y * v2.position.w);
             let nz_over_w_v3 =
                 Vec3::new(v0.normal.z * v0.position.w, v1.normal.z * v1.position.w, v2.normal.z * v2.position.w);
+            let u_over_w_v3 = Vec3::new(
+                v0.tex_coord.x * v0.position.w,
+                v1.tex_coord.x * v1.position.w,
+                v2.tex_coord.x * v2.position.w,
+            );
+            let v_over_w_v3 = Vec3::new(
+                v0.tex_coord.y * v0.position.w,
+                v1.tex_coord.y * v1.position.w,
+                v2.tex_coord.y * v2.position.w,
+            );
 
             // Precompute color/w start values and interpolation increments
             let r_over_w_min = dot(edge_min_v3, r_over_w_v3);
@@ -632,6 +660,14 @@ impl Rasterizer {
             let nz_over_w_min = dot(edge_min_v3, nz_over_w_v3);
             let nz_over_w_dx = dot(edge_dx_v3, nz_over_w_v3);
             let nz_over_w_dy = dot(edge_dy_v3, nz_over_w_v3);
+
+            // Precompute texture coordinates start values and interpolation increments
+            let u_over_w_min = dot(edge_min_v3, u_over_w_v3);
+            let u_over_w_dx = dot(edge_dx_v3, u_over_w_v3);
+            let u_over_w_dy = dot(edge_dy_v3, u_over_w_v3);
+            let v_over_w_min = dot(edge_min_v3, v_over_w_v3);
+            let v_over_w_dx = dot(edge_dx_v3, v_over_w_v3);
+            let v_over_w_dy = dot(edge_dy_v3, v_over_w_v3);
 
             // Precompute 1/w start value and interpolation increments
             let inv_w_min = dot(edge_min_v3, inv_w_v3);
@@ -676,6 +712,14 @@ impl Rasterizer {
                 ptr::null_mut()
             };
 
+            // Set up the sampler
+            let sampler = if HAS_TEXTURE {
+                // TODO: calculate LOD from the partial derivatives
+                Sampler::new(&command.texture.as_ref().unwrap(), 0.0)
+            } else {
+                Sampler::default()
+            };
+
             // Set up the initial values at each consequent row
             let mut edge0_row_24x8 = edge0_min_24x8; // starting v12 edgefunction value
             let mut edge1_row_24x8 = edge1_min_24x8; // starting v20 edgefunction value
@@ -687,6 +731,8 @@ impl Rasterizer {
             let mut nx_over_w_row = nx_over_w_min; // starting nx/w
             let mut ny_over_w_row = ny_over_w_min; // starting ny/w
             let mut nz_over_w_row = nz_over_w_min; // starting nz/w
+            let mut u_over_w_row = u_over_w_min; // starting u/w
+            let mut v_over_w_row = v_over_w_min; // starting v/w
             let mut inv_w_row = inv_w_min; // starting 1/w
 
             for _y in ymin..=ymax {
@@ -700,6 +746,8 @@ impl Rasterizer {
                 let mut nx_over_w = nx_over_w_row;
                 let mut ny_over_w = ny_over_w_row;
                 let mut nz_over_w = nz_over_w_row;
+                let mut u_over_w = u_over_w_row;
+                let mut v_over_w = v_over_w_row;
                 let mut z_24x8 = z_24x8_row;
                 let mut color_ptr: *mut u32 = if HAS_COLOR_BUFFER {
                     color_row_ptr
@@ -736,13 +784,21 @@ impl Rasterizer {
                             let inv_inv_w = 1.0 / inv_w;
 
                             if HAS_COLOR_BUFFER {
+                                let tex_fragment = if HAS_TEXTURE {
+                                    let u = u_over_w * inv_inv_w;
+                                    let v = v_over_w * inv_inv_w;
+                                    sampler.sample(u, v)
+                                } else {
+                                    RGBA::new(255, 255, 255, 255)
+                                };
+
                                 let r = r_over_w * inv_inv_w;
                                 let g = g_over_w * inv_inv_w;
                                 let b = b_over_w * inv_inv_w;
                                 let color = RGBA::new(
-                                    (r * 255.0).clamp(0.0, 255.0) as u8, //
-                                    (g * 255.0).clamp(0.0, 255.0) as u8, //
-                                    (b * 255.0).clamp(0.0, 255.0) as u8, //
+                                    (r * tex_fragment.r as f32).clamp(0.0, 255.0) as u8, //
+                                    (g * tex_fragment.g as f32).clamp(0.0, 255.0) as u8, //
+                                    (b * tex_fragment.b as f32).clamp(0.0, 255.0) as u8, //
                                     255,
                                 )
                                 .to_u32();
@@ -777,6 +833,8 @@ impl Rasterizer {
                     nx_over_w += nx_over_w_dx;
                     ny_over_w += ny_over_w_dx;
                     nz_over_w += nz_over_w_dx;
+                    u_over_w += u_over_w_dx;
+                    v_over_w += v_over_w_dx;
                     if HAS_COLOR_BUFFER {
                         unsafe {
                             color_ptr = color_ptr.add(1);
@@ -804,6 +862,8 @@ impl Rasterizer {
                 nx_over_w_row += nx_over_w_dy;
                 ny_over_w_row += ny_over_w_dy;
                 nz_over_w_row += nz_over_w_dy;
+                u_over_w_row += u_over_w_dy;
+                v_over_w_row += v_over_w_dy;
                 if HAS_COLOR_BUFFER {
                     unsafe {
                         color_row_ptr = color_row_ptr.add(Framebuffer::TILE_WITH as usize);
@@ -877,7 +937,63 @@ impl Default for RasterizationCommand<'_> {
             projection: Mat44::identity(),
             culling: CullMode::None,
             color: Vec4::new(1.0, 1.0, 1.0, 1.0),
+            texture: None,
         }
+    }
+}
+
+impl Default for ScheduledCommand {
+    fn default() -> Self {
+        ScheduledCommand { texture: None }
+    }
+}
+
+impl PartialEq for ScheduledCommand {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.texture, &other.texture) {
+            (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ScheduledCommand {}
+
+impl Default for PerTileStatistics {
+    fn default() -> Self {
+        Self { fragments_drawn: 0 }
+    }
+}
+
+impl Add for PerTileStatistics {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self { fragments_drawn: self.fragments_drawn + other.fragments_drawn }
+    }
+}
+
+impl RasterizerStatistics {
+    pub fn new() -> Self {
+        Self { committed_triangles: 0, scheduled_triangles: 0, binned_triangles: 0, fragments_drawn: 0 }
+    }
+
+    pub fn smoothed(&self, alpha: usize, prev_smooth: RasterizerStatistics) -> Self {
+        assert!(alpha <= 100);
+        let alpha1 = 100 - alpha;
+        let smooth = |curr: usize, prev: usize| ((alpha * curr) + (alpha1 * prev)) / 100;
+        RasterizerStatistics {
+            committed_triangles: smooth(self.committed_triangles, prev_smooth.committed_triangles),
+            scheduled_triangles: smooth(self.scheduled_triangles, prev_smooth.scheduled_triangles),
+            binned_triangles: smooth(self.binned_triangles, prev_smooth.binned_triangles),
+            fragments_drawn: smooth(self.fragments_drawn, prev_smooth.fragments_drawn),
+        }
+    }
+}
+
+impl Default for RasterizerStatistics {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

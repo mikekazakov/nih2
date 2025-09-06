@@ -1,6 +1,7 @@
 extern crate sdl3;
 
 use parking_lot::ReentrantMutex;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -36,6 +37,7 @@ struct State {
     rasterizer_stats: RasterizerStatistics,
     mesh: MeshData,
     mesh2: MeshData,
+    meshes: HashMap<String, MeshData>,
     display_mode: DisplayMode,
     overlay_tiles: bool,
     timestamp: Instant,
@@ -54,6 +56,7 @@ impl Default for State {
             rasterizer_stats: RasterizerStatistics::default(),
             mesh: MeshData::default(),
             mesh2: MeshData::default(),
+            meshes: HashMap::new(),
             display_mode: DisplayMode::Color,
             overlay_tiles: false,
             timestamp: Instant::now(),
@@ -164,6 +167,14 @@ fn render(state: &mut State) {
     let viewport = Viewport { xmin: 0, ymin: 0, xmax: state.color_buffer.width(), ymax: state.color_buffer.height() };
     let rasterizer = &mut state.rasterizer;
     rasterizer.setup(viewport);
+
+    let texture = Texture::new(&TextureSource {
+        texels: &[127u8, 255u8, 255u8, 127u8],
+        width: 2,
+        height: 2,
+        format: TextureFormat::Grayscale,
+    });
+
     // let lines = vec![
     //     Vec3::new(0.0, 0.0, 0.0),
     //     Vec3::new(0.5, 0.0, 0.0), //
@@ -277,7 +288,7 @@ fn render(state: &mut State) {
         //     }
         // }
 
-        {
+        if false {
             let mut colors = Vec::<Vec4>::default();
             for i in 0..state.mesh2.positions.len() {
                 colors.push(idx_to_color_hash(i));
@@ -286,7 +297,8 @@ fn render(state: &mut State) {
             cmd.normals = &state.mesh2.normals;
             // cmd.normals = &[];
             cmd.tex_coords = &state.mesh2.tex_coords;
-            cmd.colors = &colors2;
+            cmd.texture = Some(texture.clone());
+            // cmd.colors = &colors2;
             cmd.indices = &state.mesh2.indices;
             cmd.model = Mat34::translate(Vec3::new(0.0, -3.0, -10.0))
                 * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
@@ -294,17 +306,30 @@ fn render(state: &mut State) {
             {
                 let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
                 rasterizer.commit(&cmd);
-
-                cmd.model = Mat34::translate(Vec3::new(-4.0, -3.0, -10.0))
-                    * Mat34::rotate_zx(state.t.as_secs_f32() / 1.20)
-                    * Mat34::scale_uniform(2.0);
-                rasterizer.commit(&cmd);
-
-                cmd.model = Mat34::translate(Vec3::new(4.0, -3.0, -10.0))
-                    * Mat34::rotate_zx(state.t.as_secs_f32() / 1.30)
-                    * Mat34::scale_uniform(2.0);
-                rasterizer.commit(&cmd);
+                //
+                // cmd.model = Mat34::translate(Vec3::new(-4.0, -3.0, -10.0))
+                //     * Mat34::rotate_zx(state.t.as_secs_f32() / 1.20)
+                //     * Mat34::scale_uniform(2.0);
+                // rasterizer.commit(&cmd);
+                //
+                // cmd.model = Mat34::translate(Vec3::new(4.0, -3.0, -10.0))
+                //     * Mat34::rotate_zx(state.t.as_secs_f32() / 1.30)
+                //     * Mat34::scale_uniform(2.0);
+                // rasterizer.commit(&cmd);
             }
+        }
+        {
+            let mesh = state.meshes.get("Teapot3").unwrap();
+            cmd.world_positions = &mesh.positions;
+            cmd.normals = &mesh.normals;
+            cmd.tex_coords = &mesh.tex_coords;
+            cmd.texture = Some(texture.clone());
+            cmd.indices = &mesh.indices;
+            cmd.model = Mat34::translate(Vec3::new(0.0, -3.0, -10.0))
+                * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
+                * Mat34::scale_uniform(0.05);
+            let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
+            rasterizer.commit(&cmd);
         }
 
         let mut framebuffer = Framebuffer::default();
@@ -331,6 +356,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = State::default();
     state.mesh = io::load_obj(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Lamp2.obj"));
     state.mesh2 = io::load_obj(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Teapot.obj"));
+    state
+        .meshes
+        .insert("Teapot2".to_string(), io::load_obj(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Teapot2.obj")));
+    state
+        .meshes
+        .insert("Teapot3".to_string(), io::load_obj(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Teapot3.obj")));
 
     let mut event_pump = sdl_context.event_pump().map_err(|e| e.to_string())?;
 
