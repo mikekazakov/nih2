@@ -18,9 +18,9 @@ const MAX_MIP_LEVELS: usize = 16;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Mip {
-    width: u16,
-    height: u16,
-    offset: u32,
+    pub width: u16,
+    pub height: u16,
+    pub offset: u32,
 }
 
 impl Default for Mip {
