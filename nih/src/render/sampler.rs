@@ -72,7 +72,7 @@ impl Default for Sampler {
     }
 }
 
-fn noop_sample(texels: *const u8, u: f32, v: f32) -> RGBA {
+fn noop_sample(_texels: *const u8, _u: f32, _v: f32) -> RGBA {
     RGBA::new(0, 0, 0, 255)
 }
 

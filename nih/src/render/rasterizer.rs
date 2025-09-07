@@ -1603,6 +1603,54 @@ mod tests {
         rasterizer.draw(&mut framebuffer);
         assert_normals_against_reference(&normal_buffer.as_flat_buffer(), filename);
     }
+
+    fn checkerboard_rgb_texture_32x32() -> std::sync::Arc<Texture> {
+        let width = 32;
+        let height = 32;
+        let mut texels = vec![0u8; width * height * 3];
+        for y in 0..width {
+            for x in 0..height {
+                let offset = ((y * width + x) * 3) as usize;
+                if (x + y) % 2 == 0 {
+                    texels[offset] = (x * 8) as u8; // R
+                    texels[offset + 1] = (y * 8) as u8; // G
+                    texels[offset + 2] = ((62 - x - y) * 4) as u8; // B
+                } else {
+                    texels[offset] = 127;
+                    texels[offset + 1] = 127;
+                    texels[offset + 2] = 127;
+                }
+            }
+        }
+        let source =
+            TextureSource { texels: &texels, width: width as u32, height: height as u32, format: TextureFormat::RGB };
+        Texture::new(&source)
+    }
+
+    #[test]
+    fn texturing_nearest() {
+        let command = RasterizationCommand {
+            world_positions: &[
+                Vec3::new(-0.5, 0.5, 0.0),
+                Vec3::new(-0.5, -0.5, 0.0),
+                Vec3::new(0.5, 0.5, 0.0),
+                Vec3::new(0.5, 0.5, 0.0),
+                Vec3::new(-0.5, -0.5, 0.0),
+                Vec3::new(0.5, -0.5, 0.0),
+            ],
+            tex_coords: &[
+                Vec2::new(0.0, 0.0),
+                Vec2::new(0.0, 1.0),
+                Vec2::new(1.0, 0.0),
+                Vec2::new(1.0, 0.0),
+                Vec2::new(0.0, 1.0),
+                Vec2::new(1.0, 1.0),
+            ],
+            texture: Some(checkerboard_rgb_texture_32x32()),
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo(&command), "rasterizer/texturing/nearest_0.png");
+    }
 }
 
 #[cfg(test)]
