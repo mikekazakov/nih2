@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextureFormat {
-    Grayscale,
-    RGB,
-    RGBA,
+    Grayscale = 0,
+    RGB = 1,
+    RGBA = 2,
 }
 
 pub struct TextureSource<'a> {
@@ -61,7 +62,7 @@ impl Texture {
         let mut mips: [Mip; MAX_MIP_LEVELS] = Default::default();
         dim = source.width;
         for level in 0..mip_count {
-            let mip_size = (dim * dim) as usize * bpp;
+            let mip_size = ((dim * dim) as usize * bpp + 3) & !3;
             mips[level] = Mip { width: dim as u16, height: dim as u16, offset: total_size as u32 };
             total_size += mip_size;
             dim >>= 1;
@@ -132,7 +133,7 @@ mod tests {
         assert_eq!(texture.mips[0].width, 1);
         assert_eq!(texture.mips[0].height, 1);
         assert_eq!(texture.mips[0].offset, 0);
-        assert_eq!(texture.texels, vec![42u8]);
+        assert_eq!(texture.texels, vec![42u8, 0u8, 0u8, 0u8]);
     }
 
     #[test]
@@ -144,7 +145,7 @@ mod tests {
         assert_eq!(texture.mips[0].width, 1);
         assert_eq!(texture.mips[0].height, 1);
         assert_eq!(texture.mips[0].offset, 0);
-        assert_eq!(texture.texels, vec![10u8, 20u8, 30u8]);
+        assert_eq!(texture.texels, vec![10u8, 20u8, 30u8, 0u8]);
     }
 
     #[test]
@@ -159,7 +160,7 @@ mod tests {
         assert_eq!(texture.mips[1].width, 1);
         assert_eq!(texture.mips[1].height, 1);
         assert_eq!(texture.mips[1].offset, 4);
-        assert_eq!(texture.texels, vec![10u8, 20u8, 30u8, 40u8, 25u8]);
+        assert_eq!(texture.texels, vec![10u8, 20u8, 30u8, 40u8, 25u8, 0u8, 0u8, 0u8]);
     }
 
     #[test]
@@ -179,7 +180,7 @@ mod tests {
         // G = (20+50+80+110)/4 = 65
         // B = (30+60+90+120)/4 = 75
         let expected_texels =
-            [10u8, 20u8, 30u8, 40u8, 50u8, 60u8, 70u8, 80u8, 90u8, 100u8, 110u8, 120u8, 55u8, 65u8, 75u8];
+            [10u8, 20u8, 30u8, 40u8, 50u8, 60u8, 70u8, 80u8, 90u8, 100u8, 110u8, 120u8, 55u8, 65u8, 75u8, 0u8];
         assert_eq!(texture.texels, expected_texels);
     }
 
