@@ -1,13 +1,13 @@
 extern crate sdl3;
 
+use image::RgbaImage;
+use nih::math::*;
+use nih::render::*;
+use nih::util::*;
 use parking_lot::ReentrantMutex;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
-
-use nih::math::*;
-use nih::render::*;
-use nih::util::*;
 
 use nih::render::rgba::RGBA;
 use nih::util::profiler::Profiler;
@@ -38,6 +38,7 @@ struct State {
     mesh: MeshData,
     mesh2: MeshData,
     meshes: HashMap<String, MeshData>,
+    textures: HashMap<String, std::sync::Arc<Texture>>,
     display_mode: DisplayMode,
     overlay_tiles: bool,
     timestamp: Instant,
@@ -57,6 +58,7 @@ impl Default for State {
             mesh: MeshData::default(),
             mesh2: MeshData::default(),
             meshes: HashMap::new(),
+            textures: HashMap::new(),
             display_mode: DisplayMode::Color,
             overlay_tiles: false,
             timestamp: Instant::now(),
@@ -323,7 +325,8 @@ fn render(state: &mut State) {
             cmd.world_positions = &mesh.positions;
             cmd.normals = &mesh.normals;
             cmd.tex_coords = &mesh.tex_coords;
-            cmd.texture = Some(texture.clone());
+            // cmd.texture = Some(texture.clone());
+            cmd.texture = Some(state.textures.get("Teapot3").unwrap().clone());
             cmd.indices = &mesh.indices;
             cmd.model = Mat34::translate(Vec3::new(0.0, -3.0, -10.0))
                 * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
@@ -362,6 +365,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     state
         .meshes
         .insert("Teapot3".to_string(), io::load_obj(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Teapot3.obj")));
+    state
+        .textures
+        .insert("Teapot3".to_string(), io::load_texture(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/Teapot3.jpg")));
+    // let reference_image: RgbaImage = image::open(reference_path).unwrap().into_rgba8();
 
     let mut event_pump = sdl_context.event_pump().map_err(|e| e.to_string())?;
 

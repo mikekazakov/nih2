@@ -1,3 +1,4 @@
+use image::{Pixel, RgbaImage};
 use nih::math::*;
 use nih::render::*;
 use std::path::Path;
@@ -80,4 +81,20 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> nih::render::MeshData {
     }
     mesh.aabb = AABB::from_points(&mesh.positions);
     mesh
+}
+
+pub fn load_texture<P: AsRef<Path>>(path: P) -> std::sync::Arc<nih::render::Texture> {
+    let image: RgbaImage = image::open(path).unwrap().into_rgba8();
+
+    let width = image.width();
+    let height = image.height();
+    let mut pixels = Vec::<u8>::new();
+    pixels.resize((width * height * 3) as usize, 0);
+    for (x, y, pixel) in image.enumerate_pixels() {
+        pixels[((x + (height - 1 - y) * width) * 3 + 0) as usize] = pixel.0[0];
+        pixels[((x + (height - 1 - y) * width) * 3 + 1) as usize] = pixel.0[1];
+        pixels[((x + (height - 1 - y) * width) * 3 + 2) as usize] = pixel.0[2];
+    }
+    let src = TextureSource { width: width, height: height, format: TextureFormat::RGB, texels: &pixels };
+    Texture::new(&src)
 }
