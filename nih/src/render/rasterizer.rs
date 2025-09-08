@@ -1627,29 +1627,51 @@ mod tests {
         Texture::new(&source)
     }
 
-    #[test]
-    fn texturing_nearest() {
+    #[rstest]
+    #[case(&[Vec3::new(-0.5, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 0.0),
+             Vec3::new(0.5, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0),],
+           &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0),
+             Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0),],
+        "rasterizer/texturing/nearest_0.png"
+    )]
+    #[case(&[Vec3::new(-1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, 1.0, 0.0),
+             Vec3::new(1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0),],
+           &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0),
+             Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0),],
+        "rasterizer/texturing/nearest_1.png"
+    )]
+    #[case(&[Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0),
+             Vec3::new(1.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0),],
+           &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0),
+             Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0),],
+        "rasterizer/texturing/nearest_2.png"
+    )]
+    #[case(&[Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0),
+             Vec3::new(1.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0),],
+           &[Vec2::new(1.0, 0.0), Vec2::new(0.0, 0.0), Vec2::new(1.0, 1.0),
+             Vec2::new(1.0, 1.0), Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0),],
+        "rasterizer/texturing/nearest_3.png"
+    )]
+    #[case(&[Vec3::new(-1.0, 0.5, 0.0), Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 0.0),
+             Vec3::new(1.0, 0.5, 0.0), Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, -0.5, 0.0),],
+           &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0),
+             Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0),],
+        "rasterizer/texturing/nearest_4.png"
+    )]
+    #[case(&[Vec3::new(-0.5, 1.0, 0.0), Vec3::new(-0.5, -1.0, 0.0), Vec3::new(0.5, 1.0, 0.0),
+             Vec3::new(0.5, 1.0, 0.0), Vec3::new(-0.5, -1.0, 0.0), Vec3::new(0.5, -1.0, 0.0),],
+           &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0),
+             Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0),],
+        "rasterizer/texturing/nearest_5.png"
+    )]
+    fn texturing_nearest(#[case] world_positions: &[Vec3], #[case] tex_coords: &[Vec2], #[case] filename: &str) {
         let command = RasterizationCommand {
-            world_positions: &[
-                Vec3::new(-0.5, 0.5, 0.0),
-                Vec3::new(-0.5, -0.5, 0.0),
-                Vec3::new(0.5, 0.5, 0.0),
-                Vec3::new(0.5, 0.5, 0.0),
-                Vec3::new(-0.5, -0.5, 0.0),
-                Vec3::new(0.5, -0.5, 0.0),
-            ],
-            tex_coords: &[
-                Vec2::new(0.0, 0.0),
-                Vec2::new(0.0, 1.0),
-                Vec2::new(1.0, 0.0),
-                Vec2::new(1.0, 0.0),
-                Vec2::new(0.0, 1.0),
-                Vec2::new(1.0, 1.0),
-            ],
+            world_positions,
+            tex_coords,
             texture: Some(checkerboard_rgb_texture_32x32()),
             ..Default::default()
         };
-        assert_albedo_against_reference(&render_to_64x64_albedo(&command), "rasterizer/texturing/nearest_0.png");
+        assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
     }
 }
 
