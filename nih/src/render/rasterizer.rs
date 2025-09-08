@@ -1664,6 +1664,18 @@ mod tests {
              Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0),],
         "rasterizer/texturing/nearest_5.png"
     )]
+    #[case(&[Vec3::new(-1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, 1.0, 0.0),
+             Vec3::new(1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0),],
+           &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 2.0), Vec2::new(2.0, 0.0),
+             Vec2::new(2.0, 0.0), Vec2::new(0.0, 2.0), Vec2::new(2.0, 2.0),],
+        "rasterizer/texturing/nearest_6.png"
+    )]
+    #[case(&[Vec3::new(-1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, 1.0, 0.0),
+             Vec3::new(1.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0),],
+           &[Vec2::new(-0.5, -0.5), Vec2::new(-0.5, 1.5), Vec2::new(1.5, -0.5),
+             Vec2::new(1.5, -0.5), Vec2::new(-0.5, 1.5), Vec2::new(1.5, 1.5),],
+        "rasterizer/texturing/nearest_7.png"
+    )]
     fn texturing_nearest(#[case] world_positions: &[Vec3], #[case] tex_coords: &[Vec2], #[case] filename: &str) {
         let command = RasterizationCommand {
             world_positions,
