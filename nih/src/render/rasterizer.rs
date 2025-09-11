@@ -555,6 +555,15 @@ impl Rasterizer {
                 continue; // TODO: treat degenerate triangles separately
             }
 
+            // Set up the sampler
+            let sampler: Sampler = if HAS_TEXTURE {
+                // TODO: calculate LOD from the partial derivatives
+                Sampler::new(&command.texture.as_ref().unwrap(), 0.0)
+            } else {
+                Sampler::default()
+            };
+            let sampler_uv_scale: SamplerUVScale = sampler.uv_scale();
+
             // Set up the edge function biases to follow the top-left fill rule
             let is_v01_top_left = Self::is_top_left(v01);
             let is_v12_top_left = Self::is_top_left(v12);
@@ -629,14 +638,14 @@ impl Rasterizer {
             let nz_over_w_v3 =
                 Vec3::new(v0.normal.z * v0.position.w, v1.normal.z * v1.position.w, v2.normal.z * v2.position.w);
             let u_over_w_v3 = Vec3::new(
-                v0.tex_coord.x * v0.position.w,
-                v1.tex_coord.x * v1.position.w,
-                v2.tex_coord.x * v2.position.w,
+                (v0.tex_coord.x + sampler_uv_scale.bias) * sampler_uv_scale.scale * v0.position.w,
+                (v1.tex_coord.x + sampler_uv_scale.bias) * sampler_uv_scale.scale * v1.position.w,
+                (v2.tex_coord.x + sampler_uv_scale.bias) * sampler_uv_scale.scale * v2.position.w,
             );
             let v_over_w_v3 = Vec3::new(
-                v0.tex_coord.y * v0.position.w,
-                v1.tex_coord.y * v1.position.w,
-                v2.tex_coord.y * v2.position.w,
+                (v0.tex_coord.y + sampler_uv_scale.bias) * sampler_uv_scale.scale * v0.position.w,
+                (v1.tex_coord.y + sampler_uv_scale.bias) * sampler_uv_scale.scale * v1.position.w,
+                (v2.tex_coord.y + sampler_uv_scale.bias) * sampler_uv_scale.scale * v2.position.w,
             );
 
             // Precompute color/w start values and interpolation increments
@@ -712,14 +721,6 @@ impl Rasterizer {
                 ptr::null_mut()
             };
 
-            // Set up the sampler
-            let sampler = if HAS_TEXTURE {
-                // TODO: calculate LOD from the partial derivatives
-                Sampler::new(&command.texture.as_ref().unwrap(), 0.0)
-            } else {
-                Sampler::default()
-            };
-
             // Set up the initial values at each consequent row
             let mut edge0_row_24x8 = edge0_min_24x8; // starting v12 edgefunction value
             let mut edge1_row_24x8 = edge1_min_24x8; // starting v20 edgefunction value
@@ -787,7 +788,7 @@ impl Rasterizer {
                                 let tex_fragment = if HAS_TEXTURE {
                                     let u = u_over_w * inv_inv_w;
                                     let v = v_over_w * inv_inv_w;
-                                    sampler.sample(u, v)
+                                    sampler.sample_prescaled(u, v)
                                 } else {
                                     RGBA::new(255, 255, 255, 255)
                                 };

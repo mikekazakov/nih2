@@ -9,9 +9,19 @@ pub enum SamplerFilter {
 
 type SampleFunction = fn(*const u8, f32, f32) -> RGBA;
 
+#[derive(Clone, Copy, Debug)]
+pub struct SamplerUVScale {
+    // U or V coordinate is first biased by this value...
+    pub bias: f32,
+
+    // ... then scaled by this value.
+    pub scale: f32,
+}
+
 pub struct Sampler {
     texels0: *const u8,
     sample_function: SampleFunction,
+    uv_scale: SamplerUVScale,
 }
 
 impl Sampler {
@@ -57,18 +67,50 @@ impl Sampler {
                 panic!("Invalid texture size")
             }
         };
+        let uv_scale = match mip0.width {
+            1 => SamplerUVScale { bias: 10.0, scale: 1.0 },
+            2 => SamplerUVScale { bias: 10.0, scale: 2.0 },
+            4 => SamplerUVScale { bias: 10.0, scale: 4.0 },
+            8 => SamplerUVScale { bias: 10.0, scale: 8.0 },
+            16 => SamplerUVScale { bias: 10.0, scale: 16.0 },
+            32 => SamplerUVScale { bias: 10.0, scale: 32.0 },
+            64 => SamplerUVScale { bias: 10.0, scale: 64.0 },
+            128 => SamplerUVScale { bias: 10.0, scale: 128.0 },
+            256 => SamplerUVScale { bias: 10.0, scale: 256.0 },
+            512 => SamplerUVScale { bias: 10.0, scale: 512.0 },
+            1024 => SamplerUVScale { bias: 10.0, scale: 1024.0 },
+            _ => {
+                panic!("Invalid texture size")
+            }
+        };
 
-        Sampler { texels0, sample_function }
+        Sampler { texels0, sample_function, uv_scale }
+    }
+
+    pub fn sample_prescaled(&self, u: f32, v: f32) -> RGBA {
+        (self.sample_function)(self.texels0, u, v)
     }
 
     pub fn sample(&self, u: f32, v: f32) -> RGBA {
-        (self.sample_function)(self.texels0, u, v)
+        let tu = (u + self.uv_scale.bias) * self.uv_scale.scale;
+        let tv = (v + self.uv_scale.bias) * self.uv_scale.scale;
+        (self.sample_function)(self.texels0, tu, tv)
+    }
+
+    pub fn uv_scale(&self) -> SamplerUVScale {
+        self.uv_scale
     }
 }
 
 impl Default for Sampler {
     fn default() -> Self {
-        Sampler { texels0: std::ptr::null(), sample_function: noop_sample }
+        Sampler { texels0: std::ptr::null(), sample_function: noop_sample, uv_scale: SamplerUVScale::default() }
+    }
+}
+
+impl Default for SamplerUVScale {
+    fn default() -> Self {
+        SamplerUVScale { bias: 0.0, scale: 1.0 }
     }
 }
 
@@ -79,12 +121,8 @@ fn noop_sample(_texels: *const u8, _u: f32, _v: f32) -> RGBA {
 fn sample_nearest<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32, v: f32) -> RGBA {
     let bpp: usize = bytes_per_pixel_u8(FORMAT);
     let stride: usize = SIZE as usize * bpp;
-    let fwidth: f32 = SIZE as f32;
-    let fheight: f32 = SIZE as f32;
-    let tx: f32 = (u + 10.0) * fwidth;
-    let ty: f32 = (v + 10.0) * fheight;
-    let itx: i32 = unsafe { tx.to_int_unchecked() };
-    let ity: i32 = unsafe { ty.to_int_unchecked() };
+    let itx: i32 = unsafe { u.to_int_unchecked() };
+    let ity: i32 = unsafe { v.to_int_unchecked() };
     let x: usize = (itx as usize) & (SIZE as usize - 1);
     let y: usize = (ity as usize) & (SIZE as usize - 1);
     let offset: usize = y * stride + x * bpp;
