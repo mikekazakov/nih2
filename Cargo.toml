@@ -3,5 +3,5 @@ resolver = "3"
 members = ["demo", "nih"]
 
 [profile.release]
-lto = true
+#lto = true
 debug = "full"

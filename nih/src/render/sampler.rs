@@ -31,124 +31,10 @@ impl Sampler {
         let mip0_index = ((lod as f32).floor() as i32).clamp(0, mips as i32 - 1);
         let mip0 = &texture.mips[mip0_index as usize];
         let texels0 = unsafe { texture.texels.as_ptr().add(mip0.offset as usize) };
-        let sample_function = if filtering == SamplerFilter::Nearest {
-            match texture.format {
-                TextureFormat::Grayscale => match mip0.width {
-                    1 => sample_nearest::<1, { TextureFormat::Grayscale as u8 }>,
-                    2 => sample_nearest::<2, { TextureFormat::Grayscale as u8 }>,
-                    4 => sample_nearest::<4, { TextureFormat::Grayscale as u8 }>,
-                    8 => sample_nearest::<8, { TextureFormat::Grayscale as u8 }>,
-                    16 => sample_nearest::<16, { TextureFormat::Grayscale as u8 }>,
-                    32 => sample_nearest::<32, { TextureFormat::Grayscale as u8 }>,
-                    64 => sample_nearest::<64, { TextureFormat::Grayscale as u8 }>,
-                    128 => sample_nearest::<128, { TextureFormat::Grayscale as u8 }>,
-                    256 => sample_nearest::<256, { TextureFormat::Grayscale as u8 }>,
-                    512 => sample_nearest::<512, { TextureFormat::Grayscale as u8 }>,
-                    1024 => sample_nearest::<1024, { TextureFormat::Grayscale as u8 }>,
-                    _ => {
-                        panic!("Invalid texture size")
-                    }
-                },
-                TextureFormat::RGB => match mip0.width {
-                    1 => sample_nearest::<1, { TextureFormat::RGB as u8 }>,
-                    2 => sample_nearest::<2, { TextureFormat::RGB as u8 }>,
-                    4 => sample_nearest::<4, { TextureFormat::RGB as u8 }>,
-                    8 => sample_nearest::<8, { TextureFormat::RGB as u8 }>,
-                    16 => sample_nearest::<16, { TextureFormat::RGB as u8 }>,
-                    32 => sample_nearest::<32, { TextureFormat::RGB as u8 }>,
-                    64 => sample_nearest::<64, { TextureFormat::RGB as u8 }>,
-                    128 => sample_nearest::<128, { TextureFormat::RGB as u8 }>,
-                    256 => sample_nearest::<256, { TextureFormat::RGB as u8 }>,
-                    512 => sample_nearest::<512, { TextureFormat::RGB as u8 }>,
-                    1024 => sample_nearest::<1024, { TextureFormat::RGB as u8 }>,
-                    _ => {
-                        panic!("Invalid texture size")
-                    }
-                },
-                _ => {
-                    panic!("Invalid texture size")
-                }
-            }
-        } else if filtering == SamplerFilter::Bilinear {
-            match texture.format {
-                TextureFormat::Grayscale => match mip0.width {
-                    1 => sample_bilinear::<1, { TextureFormat::Grayscale as u8 }>,
-                    2 => sample_bilinear::<2, { TextureFormat::Grayscale as u8 }>,
-                    4 => sample_bilinear::<4, { TextureFormat::Grayscale as u8 }>,
-                    8 => sample_bilinear::<8, { TextureFormat::Grayscale as u8 }>,
-                    16 => sample_bilinear::<16, { TextureFormat::Grayscale as u8 }>,
-                    32 => sample_bilinear::<32, { TextureFormat::Grayscale as u8 }>,
-                    64 => sample_bilinear::<64, { TextureFormat::Grayscale as u8 }>,
-                    128 => sample_bilinear::<128, { TextureFormat::Grayscale as u8 }>,
-                    256 => sample_bilinear::<256, { TextureFormat::Grayscale as u8 }>,
-                    512 => sample_bilinear::<512, { TextureFormat::Grayscale as u8 }>,
-                    1024 => sample_bilinear::<1024, { TextureFormat::Grayscale as u8 }>,
-                    _ => {
-                        panic!("Invalid texture size")
-                    }
-                },
-                TextureFormat::RGB => match mip0.width {
-                    1 => sample_bilinear::<1, { TextureFormat::RGB as u8 }>, // TODO: cheat and use nearest
-                    2 => sample_bilinear::<2, { TextureFormat::RGB as u8 }>,
-                    4 => sample_bilinear::<4, { TextureFormat::RGB as u8 }>,
-                    8 => sample_bilinear::<8, { TextureFormat::RGB as u8 }>,
-                    16 => sample_bilinear::<16, { TextureFormat::RGB as u8 }>,
-                    32 => sample_bilinear::<32, { TextureFormat::RGB as u8 }>,
-                    64 => sample_bilinear::<64, { TextureFormat::RGB as u8 }>,
-                    128 => sample_bilinear::<128, { TextureFormat::RGB as u8 }>,
-                    256 => sample_bilinear::<256, { TextureFormat::RGB as u8 }>,
-                    512 => sample_bilinear::<512, { TextureFormat::RGB as u8 }>,
-                    1024 => sample_bilinear::<1024, { TextureFormat::RGB as u8 }>,
-                    _ => {
-                        panic!("Invalid texture size")
-                    }
-                },
-                _ => {
-                    panic!("Invalid texture size")
-                }
-            }
-        } else {
-            panic!("Invalid filtering")
-        };
-
-        let uv_scale = if filtering == SamplerFilter::Nearest {
-            match mip0.width {
-                1 => SamplerUVScale { bias: 10.0, scale: 1.0 },
-                2 => SamplerUVScale { bias: 10.0, scale: 2.0 },
-                4 => SamplerUVScale { bias: 10.0, scale: 4.0 },
-                8 => SamplerUVScale { bias: 10.0, scale: 8.0 },
-                16 => SamplerUVScale { bias: 10.0, scale: 16.0 },
-                32 => SamplerUVScale { bias: 10.0, scale: 32.0 },
-                64 => SamplerUVScale { bias: 10.0, scale: 64.0 },
-                128 => SamplerUVScale { bias: 10.0, scale: 128.0 },
-                256 => SamplerUVScale { bias: 10.0, scale: 256.0 },
-                512 => SamplerUVScale { bias: 10.0, scale: 512.0 },
-                1024 => SamplerUVScale { bias: 10.0, scale: 1024.0 },
-                _ => {
-                    panic!("Invalid texture size")
-                }
-            }
-        } else if filtering == SamplerFilter::Bilinear {
-            match mip0.width {
-                1 => SamplerUVScale { bias: 10.0 - 127.0 / (1.0 * 256.0), scale: 1.0 * 256.0 },
-                2 => SamplerUVScale { bias: 10.0 - 127.0 / (2.0 * 256.0), scale: 2.0 * 256.0 },
-                4 => SamplerUVScale { bias: 10.0 - 127.0 / (4.0 * 256.0), scale: 4.0 * 256.0 },
-                8 => SamplerUVScale { bias: 10.0 - 127.0 / (8.0 * 256.0), scale: 8.0 * 256.0 },
-                16 => SamplerUVScale { bias: 10.0 - 127.0 / (16.0 * 256.0), scale: 16.0 * 256.0 },
-                32 => SamplerUVScale { bias: 10.0 - 127.0 / (32.0 * 256.0), scale: 32.0 * 256.0 },
-                64 => SamplerUVScale { bias: 10.0 - 127.0 / (64.0 * 256.0), scale: 64.0 * 256.0 },
-                128 => SamplerUVScale { bias: 10.0 - 127.0 / (128.0 * 256.0), scale: 128.0 * 256.0 },
-                256 => SamplerUVScale { bias: 10.0 - 127.0 / (256.0 * 256.0), scale: 256.0 * 256.0 },
-                512 => SamplerUVScale { bias: 10.0 - 127.0 / (512.0 * 256.0), scale: 512.0 * 256.0 },
-                1024 => SamplerUVScale { bias: 10.0 - 127.0 / (1024.0 * 256.0), scale: 1024.0 * 256.0 },
-                _ => {
-                    panic!("Invalid texture size")
-                }
-            }
-        } else {
-            panic!("Invalid filtering")
-        };
-
+        let log2_size = mip0.width.trailing_zeros() as usize;
+        let entry = &SAMPLER_TABLE[filtering as usize][texture.format as usize][log2_size];
+        let sample_function = entry.f;
+        let uv_scale = SamplerUVScale { bias: entry.b, scale: entry.s };
         Sampler { texels0, sample_function, uv_scale }
     }
 
@@ -267,6 +153,85 @@ const fn bytes_per_pixel_u8(fmt: u8) -> usize {
         _ => unreachable!(),
     }
 }
+
+const MAX_LOG2_SIZE: usize = 10; // up to 1024
+const FORMATS: usize = 3; // Grayscale, RGB, RGBA
+const FILTERS: usize = 2; // Nearest, Bilinear (Trilinear later)
+
+#[derive(Debug, Copy, Clone)]
+struct SamplerEntry {
+    // Sampling function
+    f: SampleFunction,
+
+    // Coordinate bias: x' = (x + b) * s
+    b: f32,
+
+    // Coordinate scale: x' = (x + b) * s
+    s: f32,
+}
+
+static SAMPLER_TABLE: [[[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS]; FILTERS] = {
+    let mut table = [[[SamplerEntry { f: noop_sample, b: 0.0, s: 1.0 }; MAX_LOG2_SIZE + 1]; FORMATS]; FILTERS];
+
+    const GRAYSCALE: u8 = TextureFormat::Grayscale as u8;
+    const RGB: u8 = TextureFormat::RGB as u8;
+    // const RGBA: u8 = TextureFormat::RGBA as u8;
+    type SA = SamplerEntry;
+
+    let nearest = &mut table[SamplerFilter::Nearest as usize];
+    let ngrs = &mut nearest[TextureFormat::Grayscale as usize];
+    ngrs[0] = SA { f: sample_nearest::<1, GRAYSCALE>, b: 10.0, s: 1.0 };
+    ngrs[1] = SA { f: sample_nearest::<2, GRAYSCALE>, b: 10.0, s: 2.0 };
+    ngrs[2] = SA { f: sample_nearest::<4, GRAYSCALE>, b: 10.0, s: 4.0 };
+    ngrs[3] = SA { f: sample_nearest::<8, GRAYSCALE>, b: 10.0, s: 8.0 };
+    ngrs[4] = SA { f: sample_nearest::<16, GRAYSCALE>, b: 10.0, s: 16.0 };
+    ngrs[5] = SA { f: sample_nearest::<32, GRAYSCALE>, b: 10.0, s: 32.0 };
+    ngrs[6] = SA { f: sample_nearest::<64, GRAYSCALE>, b: 10.0, s: 64.0 };
+    ngrs[7] = SA { f: sample_nearest::<128, GRAYSCALE>, b: 10.0, s: 128.0 };
+    ngrs[8] = SA { f: sample_nearest::<256, GRAYSCALE>, b: 10.0, s: 256.0 };
+    ngrs[9] = SA { f: sample_nearest::<512, GRAYSCALE>, b: 10.0, s: 512.0 };
+    ngrs[10] = SA { f: sample_nearest::<1024, GRAYSCALE>, b: 10.0, s: 1024.0 };
+    let nrgb = &mut nearest[TextureFormat::RGB as usize];
+    nrgb[0] = SA { f: sample_nearest::<1, RGB>, b: 10.0, s: 1.0 };
+    nrgb[1] = SA { f: sample_nearest::<2, RGB>, b: 10.0, s: 2.0 };
+    nrgb[2] = SA { f: sample_nearest::<4, RGB>, b: 10.0, s: 4.0 };
+    nrgb[3] = SA { f: sample_nearest::<8, RGB>, b: 10.0, s: 8.0 };
+    nrgb[4] = SA { f: sample_nearest::<16, RGB>, b: 10.0, s: 16.0 };
+    nrgb[5] = SA { f: sample_nearest::<32, RGB>, b: 10.0, s: 32.0 };
+    nrgb[6] = SA { f: sample_nearest::<64, RGB>, b: 10.0, s: 64.0 };
+    nrgb[7] = SA { f: sample_nearest::<128, RGB>, b: 10.0, s: 128.0 };
+    nrgb[8] = SA { f: sample_nearest::<256, RGB>, b: 10.0, s: 256.0 };
+    nrgb[9] = SA { f: sample_nearest::<512, RGB>, b: 10.0, s: 512.0 };
+    nrgb[10] = SA { f: sample_nearest::<1024, RGB>, b: 10.0, s: 1024.0 };
+
+    let bilinear = &mut table[SamplerFilter::Bilinear as usize];
+    let bgrs = &mut bilinear[TextureFormat::Grayscale as usize];
+    bgrs[0] = SA { f: sample_bilinear::<1, GRAYSCALE>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
+    bgrs[1] = SA { f: sample_bilinear::<2, GRAYSCALE>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
+    bgrs[2] = SA { f: sample_bilinear::<4, GRAYSCALE>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
+    bgrs[3] = SA { f: sample_bilinear::<8, GRAYSCALE>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
+    bgrs[4] = SA { f: sample_bilinear::<16, GRAYSCALE>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
+    bgrs[5] = SA { f: sample_bilinear::<32, GRAYSCALE>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
+    bgrs[6] = SA { f: sample_bilinear::<64, GRAYSCALE>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
+    bgrs[7] = SA { f: sample_bilinear::<128, GRAYSCALE>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
+    bgrs[8] = SA { f: sample_bilinear::<256, GRAYSCALE>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
+    bgrs[9] = SA { f: sample_bilinear::<512, GRAYSCALE>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
+    bgrs[10] = SA { f: sample_bilinear::<1024, GRAYSCALE>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+    let brgb = &mut bilinear[TextureFormat::RGB as usize];
+    brgb[0] = SA { f: sample_bilinear::<1, RGB>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
+    brgb[1] = SA { f: sample_bilinear::<2, RGB>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
+    brgb[2] = SA { f: sample_bilinear::<4, RGB>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
+    brgb[3] = SA { f: sample_bilinear::<8, RGB>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
+    brgb[4] = SA { f: sample_bilinear::<16, RGB>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
+    brgb[5] = SA { f: sample_bilinear::<32, RGB>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
+    brgb[6] = SA { f: sample_bilinear::<64, RGB>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
+    brgb[7] = SA { f: sample_bilinear::<128, RGB>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
+    brgb[8] = SA { f: sample_bilinear::<256, RGB>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
+    brgb[9] = SA { f: sample_bilinear::<512, RGB>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
+    brgb[10] = SA { f: sample_bilinear::<1024, RGB>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+
+    table
+};
 
 #[cfg(test)]
 mod tests {
