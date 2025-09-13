@@ -39,6 +39,7 @@ struct State {
     mesh2: MeshData,
     meshes: HashMap<String, MeshData>,
     textures: HashMap<String, std::sync::Arc<Texture>>,
+    texture_filtering: SamplerFilter,
     display_mode: DisplayMode,
     overlay_tiles: bool,
     timestamp: Instant,
@@ -59,6 +60,7 @@ impl Default for State {
             mesh2: MeshData::default(),
             meshes: HashMap::new(),
             textures: HashMap::new(),
+            texture_filtering: SamplerFilter::Nearest,
             display_mode: DisplayMode::Color,
             overlay_tiles: false,
             timestamp: Instant::now(),
@@ -273,6 +275,7 @@ fn render(state: &mut State) {
         cmd.projection =
             Mat44::perspective(1.0, 20.0, std::f32::consts::PI / 3.0, viewport.xmax as f32 / viewport.ymax as f32);
         cmd.culling = CullMode::CW;
+        cmd.sampling_filter = state.texture_filtering;
 
         // {
         //     cmd.world_positions = &state.mesh.positions;
@@ -329,8 +332,8 @@ fn render(state: &mut State) {
             cmd.texture = Some(state.textures.get("Teapot3").unwrap().clone());
             cmd.indices = &mesh.indices;
             cmd.model = Mat34::translate(Vec3::new(0.0, -3.0, -10.0))
-                * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
-                * Mat34::scale_uniform(0.05);
+                // * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
+                * Mat34::scale_uniform(0.08);
             let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
             rasterizer.commit(&cmd);
         }
@@ -390,6 +393,13 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Event::KeyDown { keycode: Some(Keycode::_0), keymod: Mod::LGUIMOD, .. } => {
                     state.overlay_tiles = !state.overlay_tiles;
+                }
+                Event::KeyDown { keycode: Some(Keycode::T), keymod: Mod::LGUIMOD, .. } => {
+                    state.texture_filtering = match state.texture_filtering {
+                        SamplerFilter::Nearest => SamplerFilter::Bilinear,
+                        SamplerFilter::Bilinear => SamplerFilter::Nearest,
+                        SamplerFilter::Trilinear => SamplerFilter::Nearest,
+                    };
                 }
                 _ => {}
             }
