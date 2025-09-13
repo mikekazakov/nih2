@@ -33,11 +33,13 @@ pub struct RasterizationCommand<'a> {
     pub culling: CullMode,
     pub color: Vec4,
     pub texture: Option<std::sync::Arc<Texture>>,
+    pub sampling_filter: SamplerFilter,
 }
 
 #[derive(Debug, Clone)]
 struct ScheduledCommand {
     texture: Option<std::sync::Arc<Texture>>,
+    sampling_filter: SamplerFilter,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -274,7 +276,8 @@ impl Rasterizer {
         self.stats.scheduled_triangles += (self.vertices.len() - scheduled_vertices_start) / 3;
 
         // Reuse the last command or create a new one
-        let required_scheduled_command = ScheduledCommand { texture: command.texture.clone() };
+        let required_scheduled_command =
+            ScheduledCommand { texture: command.texture.clone(), sampling_filter: command.sampling_filter };
         if self.commands.is_empty() || self.commands.last().unwrap() != &required_scheduled_command {
             self.commands.push(required_scheduled_command);
         }
@@ -558,7 +561,7 @@ impl Rasterizer {
             // Set up the sampler
             let sampler: Sampler = if HAS_TEXTURE {
                 // TODO: calculate LOD from the partial derivatives
-                Sampler::new(&command.texture.as_ref().unwrap(), 0.0)
+                Sampler::new(&command.texture.as_ref().unwrap(), command.sampling_filter, 0.0)
             } else {
                 Sampler::default()
             };
@@ -939,18 +942,22 @@ impl Default for RasterizationCommand<'_> {
             culling: CullMode::None,
             color: Vec4::new(1.0, 1.0, 1.0, 1.0),
             texture: None,
+            sampling_filter: SamplerFilter::Nearest,
         }
     }
 }
 
 impl Default for ScheduledCommand {
     fn default() -> Self {
-        ScheduledCommand { texture: None }
+        ScheduledCommand { texture: None, sampling_filter: SamplerFilter::Nearest }
     }
 }
 
 impl PartialEq for ScheduledCommand {
     fn eq(&self, other: &Self) -> bool {
+        if self.sampling_filter != other.sampling_filter {
+            return false;
+        }
         match (&self.texture, &other.texture) {
             (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
             (None, None) => true,
