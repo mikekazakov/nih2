@@ -171,6 +171,7 @@ fn render(state: &mut State) {
     let viewport = Viewport { xmin: 0, ymin: 0, xmax: state.color_buffer.width(), ymax: state.color_buffer.height() };
     let rasterizer = &mut state.rasterizer;
     rasterizer.setup(viewport);
+    // rasterizer.set_debug_coloring(true);
 
     let texture = Texture::new(&TextureSource {
         texels: &[127u8, 255u8, 255u8, 127u8],
