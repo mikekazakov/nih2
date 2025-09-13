@@ -96,6 +96,7 @@ pub struct Rasterizer {
     tiles_x: u16,
     tiles_y: u16,
     stats: RasterizerStatistics,
+    debug_coloring: bool,
 }
 
 impl Default for Tile {
@@ -122,6 +123,7 @@ impl Rasterizer {
             tiles_x: 1,
             tiles_y: 1,
             stats: RasterizerStatistics::new(),
+            debug_coloring: false,
         };
     }
 
@@ -275,9 +277,26 @@ impl Rasterizer {
         }
         self.stats.scheduled_triangles += (self.vertices.len() - scheduled_vertices_start) / 3;
 
+        // When debug triangle coloring is enabled, textures are disabled.
+        let command_texture = if self.debug_coloring {
+            None
+        } else {
+            command.texture.clone()
+        };
+
+        // When debug triangle coloring is enabled, color the triangles using their indices.
+        if self.debug_coloring {
+            for vert_idx in (scheduled_vertices_start..self.vertices.len()).step_by(3) {
+                let color = debug_color(vert_idx as u32);
+                self.vertices[vert_idx + 0].color = color;
+                self.vertices[vert_idx + 1].color = color;
+                self.vertices[vert_idx + 2].color = color;
+            }
+        }
+
         // Reuse the last command or create a new one
         let required_scheduled_command =
-            ScheduledCommand { texture: command.texture.clone(), sampling_filter: command.sampling_filter };
+            ScheduledCommand { texture: command_texture, sampling_filter: command.sampling_filter };
         if self.commands.is_empty() || self.commands.last().unwrap() != &required_scheduled_command {
             self.commands.push(required_scheduled_command);
         }
@@ -784,6 +803,11 @@ impl Rasterizer {
                             }
                         }
 
+                        // A crude wireframe support might look like this:
+                        // if edge0_24x8 >= 4096 && edge1_24x8 >= 4096 && edge2_24x8 >= 4096 {
+                        //     discard = true;
+                        // }
+
                         if !discard {
                             let inv_inv_w = 1.0 / inv_w;
 
@@ -891,6 +915,25 @@ impl Rasterizer {
     pub fn statistics(&self) -> RasterizerStatistics {
         self.stats
     }
+
+    pub fn set_debug_coloring(&mut self, debug_coloring: bool) {
+        self.debug_coloring = debug_coloring;
+    }
+}
+
+fn debug_color(idx: u32) -> Vec4 {
+    fn hash(mut x: u32) -> u32 {
+        x = (x ^ 61) ^ (x >> 16);
+        x = x.wrapping_add(x << 3);
+        x ^= x >> 4;
+        x = x.wrapping_mul(0x27d4eb2d);
+        x ^ (x >> 15)
+    }
+    let h = hash(idx);
+    let r = (h & 0xff) as u8;
+    let g = ((h >> 8) & 0xff) as u8;
+    let b = ((h >> 16) & 0xff) as u8;
+    Vec4::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0)
 }
 
 fn perspective_divide(v: Vec4) -> Vec4 {
