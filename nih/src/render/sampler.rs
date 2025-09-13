@@ -130,17 +130,17 @@ impl Sampler {
             }
         } else if filtering == SamplerFilter::Bilinear {
             match mip0.width {
-                1 => SamplerUVScale { bias: 10.0, scale: 1.0 * 256.0 },
-                2 => SamplerUVScale { bias: 10.0, scale: 2.0 * 256.0 },
-                4 => SamplerUVScale { bias: 10.0, scale: 4.0 * 256.0 },
-                8 => SamplerUVScale { bias: 10.0, scale: 8.0 * 256.0 },
-                16 => SamplerUVScale { bias: 10.0, scale: 16.0 * 256.0 },
-                32 => SamplerUVScale { bias: 10.0, scale: 32.0 * 256.0 },
-                64 => SamplerUVScale { bias: 10.0, scale: 64.0 * 256.0 },
-                128 => SamplerUVScale { bias: 10.0, scale: 128.0 * 256.0 },
-                256 => SamplerUVScale { bias: 10.0, scale: 256.0 * 256.0 },
-                512 => SamplerUVScale { bias: 10.0, scale: 512.0 * 256.0 },
-                1024 => SamplerUVScale { bias: 10.0, scale: 1024.0 * 256.0 },
+                1 => SamplerUVScale { bias: 10.0 - 127.0 / (1.0 * 256.0), scale: 1.0 * 256.0 },
+                2 => SamplerUVScale { bias: 10.0 - 127.0 / (2.0 * 256.0), scale: 2.0 * 256.0 },
+                4 => SamplerUVScale { bias: 10.0 - 127.0 / (4.0 * 256.0), scale: 4.0 * 256.0 },
+                8 => SamplerUVScale { bias: 10.0 - 127.0 / (8.0 * 256.0), scale: 8.0 * 256.0 },
+                16 => SamplerUVScale { bias: 10.0 - 127.0 / (16.0 * 256.0), scale: 16.0 * 256.0 },
+                32 => SamplerUVScale { bias: 10.0 - 127.0 / (32.0 * 256.0), scale: 32.0 * 256.0 },
+                64 => SamplerUVScale { bias: 10.0 - 127.0 / (64.0 * 256.0), scale: 64.0 * 256.0 },
+                128 => SamplerUVScale { bias: 10.0 - 127.0 / (128.0 * 256.0), scale: 128.0 * 256.0 },
+                256 => SamplerUVScale { bias: 10.0 - 127.0 / (256.0 * 256.0), scale: 256.0 * 256.0 },
+                512 => SamplerUVScale { bias: 10.0 - 127.0 / (512.0 * 256.0), scale: 512.0 * 256.0 },
+                1024 => SamplerUVScale { bias: 10.0 - 127.0 / (1024.0 * 256.0), scale: 1024.0 * 256.0 },
                 _ => {
                     panic!("Invalid texture size")
                 }
@@ -212,23 +212,21 @@ fn sample_bilinear<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32,
     debug_assert!(u >= 0.0 && v >= 1.0);
     let bpp: usize = bytes_per_pixel_u8(FORMAT);
     let stride: usize = SIZE as usize * bpp;
-    let half: i32 = 127;
-    let offset: i32 = 1 << 20; // why so much??
     let itx: i32 = unsafe { u.to_int_unchecked() };
     let ity: i32 = unsafe { v.to_int_unchecked() };
-    let bx: u32 = (itx + offset - half) as u32;
-    let by: u32 = (ity + offset - half) as u32;
-    let wx1: u32 = bx & 255;
+    let tx: u32 = itx as u32;
+    let ty: u32 = ity as u32;
+    let wx1: u32 = tx & 255;
     let wx: u32 = 256 - wx1;
-    let wy1: u32 = by & 255;
+    let wy1: u32 = ty & 255;
     let wy: u32 = 256 - wy1;
     let wa: u32 = wx * wy;
     let wb: u32 = wx1 * wy;
     let wc: u32 = wx * wy1;
     let wd: u32 = wx1 * wy1;
-    let x0: u32 = bx >> 8;
+    let x0: u32 = tx >> 8;
     let x1: u32 = x0 + 1;
-    let y0: u32 = by >> 8;
+    let y0: u32 = ty >> 8;
     let y1: u32 = y0 + 1;
     let tx0: u32 = x0 & (SIZE as u32 - 1);
     let tx1: u32 = x1 & (SIZE as u32 - 1);

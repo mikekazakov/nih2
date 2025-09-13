@@ -60,7 +60,7 @@ impl Default for State {
             mesh2: MeshData::default(),
             meshes: HashMap::new(),
             textures: HashMap::new(),
-            texture_filtering: SamplerFilter::Nearest,
+            texture_filtering: SamplerFilter::Bilinear,
             display_mode: DisplayMode::Color,
             overlay_tiles: false,
             timestamp: Instant::now(),
@@ -332,7 +332,7 @@ fn render(state: &mut State) {
             cmd.texture = Some(state.textures.get("Teapot3").unwrap().clone());
             cmd.indices = &mesh.indices;
             cmd.model = Mat34::translate(Vec3::new(0.0, -3.0, -10.0))
-                // * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
+                * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
                 * Mat34::scale_uniform(0.08);
             let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
             rasterizer.commit(&cmd);
