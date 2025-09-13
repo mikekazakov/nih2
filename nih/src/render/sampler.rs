@@ -88,7 +88,7 @@ impl Sampler {
                     }
                 },
                 TextureFormat::RGB => match mip0.width {
-                    1 => sample_bilinear::<1, { TextureFormat::RGB as u8 }>,
+                    1 => sample_bilinear::<1, { TextureFormat::RGB as u8 }>, // TODO: cheat and use nearest
                     2 => sample_bilinear::<2, { TextureFormat::RGB as u8 }>,
                     4 => sample_bilinear::<4, { TextureFormat::RGB as u8 }>,
                     8 => sample_bilinear::<8, { TextureFormat::RGB as u8 }>,
@@ -234,14 +234,29 @@ fn sample_bilinear<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32,
     let tx1: u32 = x1 & (SIZE as u32 - 1);
     let ty0: u32 = y0 & (SIZE as u32 - 1);
     let ty1: u32 = y1 & (SIZE as u32 - 1);
+    let offset_a: usize = ty0 as usize * stride + tx0 as usize * bpp;
+    let offset_b: usize = ty0 as usize * stride + tx1 as usize * bpp;
+    let offset_c: usize = ty1 as usize * stride + tx0 as usize * bpp;
+    let offset_d: usize = ty1 as usize * stride + tx1 as usize * bpp;
     if FORMAT == TextureFormat::Grayscale as u8 {
-        let a: u8 = unsafe { *texels.add(ty0 as usize * stride + tx0 as usize * bpp) };
-        let b: u8 = unsafe { *texels.add(ty0 as usize * stride + tx1 as usize * bpp) };
-        let c: u8 = unsafe { *texels.add(ty1 as usize * stride + tx0 as usize * bpp) };
-        let d: u8 = unsafe { *texels.add(ty1 as usize * stride + tx1 as usize * bpp) };
+        let a: u8 = unsafe { *texels.add(offset_a) };
+        let b: u8 = unsafe { *texels.add(offset_b) };
+        let c: u8 = unsafe { *texels.add(offset_c) };
+        let d: u8 = unsafe { *texels.add(offset_d) };
         let abcd: u32 = (a as u32) * wa + (b as u32) * wb + (c as u32) * wc + (d as u32) * wd;
         let result: u8 = (abcd >> 16) as u8;
         return RGBA::new(result, result, result, 255);
+    }
+    if FORMAT == TextureFormat::RGB as u8 {
+        let a: u32 = unsafe { (texels.add(offset_a) as *const u32).read_unaligned() };
+        let b: u32 = unsafe { (texels.add(offset_b) as *const u32).read_unaligned() };
+        let c: u32 = unsafe { (texels.add(offset_c) as *const u32).read_unaligned() };
+        let d: u32 = unsafe { (texels.add(offset_d) as *const u32).read_unaligned() };
+        let r: u32 = (a & 0xFF) * wa + (b & 0xFF) * wb + (c & 0xFF) * wc + (d & 0xFF) * wd;
+        let g: u32 = ((a >> 8) & 0xFF) * wa + ((b >> 8) & 0xFF) * wb + ((c >> 8) & 0xFF) * wc + ((d >> 8) & 0xFF) * wd;
+        let b: u32 =
+            ((a >> 16) & 0xFF) * wa + ((b >> 16) & 0xFF) * wb + ((c >> 16) & 0xFF) * wc + ((d >> 16) & 0xFF) * wd;
+        return RGBA::new((r >> 16) as u8, (g >> 16) as u8, (b >> 16) as u8, 255);
     }
     RGBA::new(0, 0, 0, 255)
 }
@@ -460,5 +475,62 @@ mod tests {
             assert_rgba_eq!(sampler.sample(5.9, 0.9), RGBA::new(64, 64, 64, 255), 2);
             assert_rgba_eq!(sampler.sample(5.9, -3.9), RGBA::new(64, 64, 64, 255), 2);
         }
+    }
+
+    #[test]
+    fn test_sample_bilinear_from_1x1_rgb_texture() {
+        let texture = Texture::new(&TextureSource {
+            texels: &[250u8, 150u8, 50u8],
+            width: 1,
+            height: 1,
+            format: TextureFormat::RGB,
+        });
+        let sampler = Sampler::new(&texture, SamplerFilter::Bilinear, 0.0);
+        assert_rgba_eq!(sampler.sample(0.0, 0.0), RGBA::new(250, 150, 50, 255), 1);
+        assert_rgba_eq!(sampler.sample(1.0, 0.0), RGBA::new(250, 150, 50, 255), 1);
+        assert_rgba_eq!(sampler.sample(0.0, 1.0), RGBA::new(250, 150, 50, 255), 1);
+        assert_rgba_eq!(sampler.sample(1.0, 1.0), RGBA::new(250, 150, 50, 255), 1);
+        assert_rgba_eq!(sampler.sample(-1.0, -1.0), RGBA::new(250, 150, 50, 255), 1);
+        assert_rgba_eq!(sampler.sample(0.5, 0.5), RGBA::new(250, 150, 50, 255), 1);
+    }
+
+    #[test]
+    fn test_sample_bilinear_from_2x2_rgb_texture() {
+        // Texel layout (row-major):
+        // [ (0,0): red, (1,0): green ]
+        // [ (0,1): blue, (1,1): white ]
+        // RGB: red=(255,0,0), green=(0,255,0), blue=(0,0,255), white=(255,255,255)
+        let texels: [u8; 12] = [
+            255, 0, 0, // (0,0) red
+            0, 255, 0, // (1,0) green
+            0, 0, 255, // (0,1) blue
+            255, 255, 255, // (1,1) white
+        ];
+        let texture = Texture::new(&TextureSource { texels: &texels, width: 2, height: 2, format: TextureFormat::RGB });
+        let sampler = Sampler::new(&texture, SamplerFilter::Bilinear, 0.0);
+        assert_rgba_eq!(sampler.sample(0.00, 0.00), RGBA::new(127, 127, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.25, 0.00), RGBA::new(127, 0, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.50, 0.00), RGBA::new(127, 127, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.75, 0.00), RGBA::new(127, 255, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(1.00, 0.00), RGBA::new(127, 127, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.00, 0.25), RGBA::new(127, 127, 0, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.25, 0.25), RGBA::new(255, 0, 0, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.50, 0.25), RGBA::new(127, 127, 0, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.75, 0.25), RGBA::new(0, 255, 0, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.00, 0.50), RGBA::new(127, 127, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.25, 0.50), RGBA::new(127, 0, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.50, 0.50), RGBA::new(127, 127, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.75, 0.50), RGBA::new(127, 255, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(1.00, 0.50), RGBA::new(127, 127, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.00, 0.75), RGBA::new(127, 127, 255, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.25, 0.75), RGBA::new(0, 0, 255, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.50, 0.75), RGBA::new(127, 127, 255, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.75, 0.75), RGBA::new(255, 255, 255, 255), 2);
+        assert_rgba_eq!(sampler.sample(1.00, 0.75), RGBA::new(127, 127, 255, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.00, 1.00), RGBA::new(127, 127, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.25, 1.00), RGBA::new(127, 0, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.50, 1.00), RGBA::new(127, 127, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(0.75, 1.00), RGBA::new(127, 255, 127, 255), 2);
+        assert_rgba_eq!(sampler.sample(1.00, 1.00), RGBA::new(127, 127, 127, 255), 2);
     }
 }
