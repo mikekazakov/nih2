@@ -398,8 +398,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Event::KeyDown { keycode: Some(Keycode::T), keymod: Mod::LGUIMOD, .. } => {
                     state.texture_filtering = match state.texture_filtering {
                         SamplerFilter::Nearest => SamplerFilter::Bilinear,
-                        SamplerFilter::Bilinear => SamplerFilter::Nearest,
-                        SamplerFilter::Trilinear => SamplerFilter::Nearest,
+                        SamplerFilter::Bilinear => SamplerFilter::DebugMip,
+                        _ => SamplerFilter::Nearest,
                     };
                 }
                 _ => {}

@@ -571,16 +571,22 @@ impl Rasterizer {
             let v20 = v0_xy - v2_xy;
             let v02 = v2_xy - v0_xy;
 
-            let area_x_2 = v01.x * v02.y - v01.y * v02.x;
-
+            let area_x_2: f32 = v01.x * v02.y - v01.y * v02.x;
             if area_x_2 < 1.0 {
                 continue; // TODO: treat degenerate triangles separately
             }
 
             // Set up the sampler
             let sampler: Sampler = if HAS_TEXTURE {
-                // TODO: calculate LOD from the partial derivatives
-                Sampler::new(&command.texture.as_ref().unwrap(), command.sampling_filter, 0.0)
+                let texture = command.texture.as_ref().unwrap();
+                let t01: Vec2 = v1.tex_coord - v0.tex_coord;
+                let t02: Vec2 = v2.tex_coord - v0.tex_coord;
+                let texel_area_x_2: f32 = (t01.x * t02.y - t02.x * t01.y).abs()
+                    * texture.mips[0].width as f32
+                    * texture.mips[0].height as f32;
+                let rho2: f32 = texel_area_x_2 / area_x_2;
+                let lod: f32 = 0.5 * rho2.log2();
+                Sampler::new(texture, command.sampling_filter, lod)
             } else {
                 Sampler::default()
             };
@@ -1732,6 +1738,67 @@ mod tests {
             world_positions,
             tex_coords,
             texture: Some(checkerboard_rgb_texture_32x32()),
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
+    }
+
+    #[rstest]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0)],
+        "rasterizer/texturing/mip_selection_00.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -0.6), Vec2::new(0.6, 1.0)],
+        "rasterizer/texturing/mip_selection_01.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -0.4), Vec2::new(0.4, 1.0)],
+        "rasterizer/texturing/mip_selection_02.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.0), Vec2::new(0.0, 1.0)],
+        "rasterizer/texturing/mip_selection_03.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.2), Vec2::new(-0.2, 1.0)],
+        "rasterizer/texturing/mip_selection_04.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.3), Vec2::new(-0.3, 1.0)],
+        "rasterizer/texturing/mip_selection_05.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.5), Vec2::new(-0.5, 1.0)],
+        "rasterizer/texturing/mip_selection_06.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.6), Vec2::new(-0.6, 1.0)],
+        "rasterizer/texturing/mip_selection_07.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.65), Vec2::new(-0.65, 1.0)],
+        "rasterizer/texturing/mip_selection_08.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.75), Vec2::new(-0.75, 1.0)],
+        "rasterizer/texturing/mip_selection_09.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.87), Vec2::new(-0.87, 1.0)],
+        "rasterizer/texturing/mip_selection_10.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.93), Vec2::new(-0.93, 1.0)],
+        "rasterizer/texturing/mip_selection_11.png"
+    )]
+    #[case(&[Vec2::new(-1.0, 1.0), Vec2::new(-1.0, 0.96), Vec2::new(-0.96, 1.0)],
+        "rasterizer/texturing/mip_selection_12.png"
+    )]
+    fn texturing_mip_selection(#[case] positions: &[Vec2], #[case] filename: &str) {
+        let texture = Texture::new(&TextureSource {
+            texels: &vec![255u8; 64 * 64],
+            width: 64,
+            height: 64,
+            format: TextureFormat::Grayscale,
+        });
+        let command = RasterizationCommand {
+            world_positions: &[
+                Vec3::new(positions[0].x, positions[0].y, 0.0),
+                Vec3::new(positions[1].x, positions[1].y, 0.0),
+                Vec3::new(positions[2].x, positions[2].y, 0.0),
+            ],
+            tex_coords: &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0)],
+            texture: Some(texture),
+            sampling_filter: SamplerFilter::DebugMip,
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
