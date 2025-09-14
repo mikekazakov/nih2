@@ -5,7 +5,8 @@ use super::*;
 pub enum SamplerFilter {
     Nearest = 0,
     Bilinear = 1,
-    Trilinear = 2,
+    DebugMip = 2,
+    Trilinear = 3,
 }
 
 type SampleFunction = fn(*const u8, f32, f32) -> RGBA;
@@ -28,7 +29,12 @@ pub struct Sampler {
 impl Sampler {
     pub fn new(texture: &std::sync::Arc<Texture>, filtering: SamplerFilter, lod: f32) -> Self {
         let mips = texture.count;
-        let mip0_index = ((lod as f32).floor() as i32).clamp(0, mips as i32 - 1);
+        let mip0_index = match filtering {
+            SamplerFilter::Nearest | SamplerFilter::Bilinear | SamplerFilter::DebugMip => {
+                ((lod as f32).round() as i32).clamp(0, mips as i32 - 1)
+            }
+            SamplerFilter::Trilinear => ((lod as f32).floor() as i32).clamp(0, mips as i32 - 1),
+        };
         let mip0 = &texture.mips[mip0_index as usize];
         let texels0 = unsafe { texture.texels.as_ptr().add(mip0.offset as usize) };
         let log2_size = mip0.width.trailing_zeros() as usize;
@@ -145,6 +151,25 @@ fn sample_bilinear<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32,
     RGBA::new(0, 0, 0, 255)
 }
 
+fn mip_size_sample<const SIZE: u16>(_texels: *const u8, _u: f32, _v: f32) -> RGBA {
+    match SIZE {
+        1 => RGBA::new(255, 0, 0, 255),       // red
+        2 => RGBA::new(0, 255, 0, 255),       // green
+        4 => RGBA::new(0, 0, 255, 255),       // blue
+        8 => RGBA::new(255, 255, 0, 255),     // yellow
+        16 => RGBA::new(255, 0, 255, 255),    // magenta
+        32 => RGBA::new(0, 255, 255, 255),    // cyan
+        64 => RGBA::new(255, 128, 0, 255),    // orange
+        128 => RGBA::new(255, 192, 203, 255), // pink
+        256 => RGBA::new(0, 128, 255, 255),   // sky blue
+        512 => RGBA::new(128, 255, 0, 255),   // lime
+        1024 => RGBA::new(128, 0, 255, 255),  // purple
+        2048 => RGBA::new(0, 128, 128, 255),  // teal
+        4096 => RGBA::new(255, 0, 128, 255),  // rose
+        _ => RGBA::new(0, 0, 0, 255),
+    }
+}
+
 const fn bytes_per_pixel_u8(fmt: u8) -> usize {
     match fmt {
         x if x == TextureFormat::RGBA as u8 => 4,
@@ -156,7 +181,7 @@ const fn bytes_per_pixel_u8(fmt: u8) -> usize {
 
 const MAX_LOG2_SIZE: usize = 10; // up to 1024
 const FORMATS: usize = 3; // Grayscale, RGB, RGBA
-const FILTERS: usize = 2; // Nearest, Bilinear (Trilinear later)
+const FILTERS: usize = 3; // Nearest, Bilinear, Debug, (Trilinear later)
 
 #[derive(Debug, Copy, Clone)]
 struct SamplerEntry {
@@ -229,6 +254,21 @@ static SAMPLER_TABLE: [[[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS]; FILTERS] = 
     brgb[8] = SA { f: sample_bilinear::<256, RGB>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
     brgb[9] = SA { f: sample_bilinear::<512, RGB>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
     brgb[10] = SA { f: sample_bilinear::<1024, RGB>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+
+    let debug = &mut table[SamplerFilter::DebugMip as usize];
+    let dgrs = &mut debug[TextureFormat::Grayscale as usize];
+    dgrs[0] = SA { f: mip_size_sample::<1>, b: 0.0, s: 1.0 };
+    dgrs[1] = SA { f: mip_size_sample::<2>, b: 0.0, s: 1.0 };
+    dgrs[2] = SA { f: mip_size_sample::<4>, b: 0.0, s: 1.0 };
+    dgrs[3] = SA { f: mip_size_sample::<8>, b: 0.0, s: 1.0 };
+    dgrs[4] = SA { f: mip_size_sample::<16>, b: 0.0, s: 1.0 };
+    dgrs[5] = SA { f: mip_size_sample::<32>, b: 0.0, s: 1.0 };
+    dgrs[6] = SA { f: mip_size_sample::<64>, b: 0.0, s: 1.0 };
+    dgrs[7] = SA { f: mip_size_sample::<128>, b: 0.0, s: 1.0 };
+    dgrs[8] = SA { f: mip_size_sample::<256>, b: 0.0, s: 1.0 };
+    dgrs[9] = SA { f: mip_size_sample::<512>, b: 0.0, s: 1.0 };
+    dgrs[10] = SA { f: mip_size_sample::<1024>, b: 0.0, s: 1.0 };
+    debug[TextureFormat::RGB as usize] = debug[TextureFormat::Grayscale as usize];
 
     table
 };
