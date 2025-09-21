@@ -11,3 +11,8 @@ image = "0.25.6"
 
 [dev-dependencies]
 rstest = "0.18"
+criterion = "0.7"
+
+[[bench]]
+name = "sampler"
+harness = false
