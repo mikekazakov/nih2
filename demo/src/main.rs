@@ -333,7 +333,9 @@ fn render(state: &mut State) {
             cmd.texture = Some(state.textures.get("Teapot3").unwrap().clone());
             cmd.indices = &mesh.indices;
             cmd.model = Mat34::translate(Vec3::new(0.0, -3.0, -10.0))
-                * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
+                // * Mat34::rotate_zx(state.t.as_secs_f32() / 1.10)
+                * Mat34::rotate_zx(state.t.as_secs_f32() / 4.10)
+                // * Mat34::translate(Vec3::new(0.0, 0.0, -state.t.as_secs_f32().cos() * 8.0 - 4.0) )
                 * Mat34::scale_uniform(0.08);
             let _profile_commit_scope = profiler::ProfileScope::new("commit", &profiler);
             rasterizer.commit(&cmd);
@@ -398,7 +400,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Event::KeyDown { keycode: Some(Keycode::T), keymod: Mod::LGUIMOD, .. } => {
                     state.texture_filtering = match state.texture_filtering {
                         SamplerFilter::Nearest => SamplerFilter::Bilinear,
-                        SamplerFilter::Bilinear => SamplerFilter::DebugMip,
+                        SamplerFilter::Bilinear => SamplerFilter::Trilinear,
+                        SamplerFilter::Trilinear => SamplerFilter::DebugMip,
                         _ => SamplerFilter::Nearest,
                     };
                 }
@@ -421,24 +424,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             render(&mut state);
 
             state.rasterizer_stats = state.rasterizer.statistics().smoothed(5, state.rasterizer_stats);
-
-            if (state.timestamp - state.last_printout).as_secs() > 2 {
-                state.last_printout = state.timestamp;
-                profiler.print();
-
-                let title = format!(
-                    "({}x{})px, {} tiles, tri_comm: {}, tri_sched: {}, tri_binn: {}, rast_frags: {}, FPS: {:.0}",
-                    size.0,
-                    size.1,
-                    state.color_buffer.tiles_x() * state.color_buffer.tiles_y(),
-                    state.rasterizer_stats.committed_triangles,
-                    state.rasterizer_stats.scheduled_triangles,
-                    state.rasterizer_stats.binned_triangles,
-                    state.rasterizer_stats.fragments_drawn,
-                    1.0 / state.dt.as_secs_f32()
-                );
-                window.set_title(&title).map_err(|e| e.to_string())?;
-            }
         }
 
         {
@@ -459,6 +444,25 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 blit_normals_to_window(&mut flat, &window, &event_pump);
             }
+        }
+
+        if (state.timestamp - state.last_printout).as_secs() > 2 {
+            state.last_printout = state.timestamp;
+            profiler.print();
+            // profiler.reset();
+            let size = window.size();
+            let title = format!(
+                "({}x{})px, {} tiles, tri_comm: {}, tri_sched: {}, tri_binn: {}, rast_frags: {}, FPS: {:.0}",
+                size.0,
+                size.1,
+                state.color_buffer.tiles_x() * state.color_buffer.tiles_y(),
+                state.rasterizer_stats.committed_triangles,
+                state.rasterizer_stats.scheduled_triangles,
+                state.rasterizer_stats.binned_triangles,
+                state.rasterizer_stats.fragments_drawn,
+                1.0 / state.dt.as_secs_f32()
+            );
+            window.set_title(&title).map_err(|e| e.to_string())?;
         }
     }
 

@@ -28,17 +28,28 @@ pub struct Sampler {
 
 impl Sampler {
     pub fn new(texture: &std::sync::Arc<Texture>, filtering: SamplerFilter, lod: f32) -> Self {
-        let mips = texture.count;
+        let mips: u32 = texture.count;
+        let lod_rounded: f32 = if lod > 0.0 { lod.round() } else { 0.0 };
+        let lod_floored: f32 = if lod > 0.0 { lod.floor() } else { 0.0 };
+        let lod_fract: f32 = if lod > 0.0 { lod - lod_floored } else { 0.0 };
+        let lod_fract_level: usize = (lod_fract * TRILINEAR_FRACT_LEVELS as f32) as usize;
+        debug_assert!(lod_fract_level < TRILINEAR_FRACT_LEVELS as usize);
+
         let mip0_index = match filtering {
             SamplerFilter::Nearest | SamplerFilter::Bilinear | SamplerFilter::DebugMip => {
-                ((lod as f32).round() as i32).clamp(0, mips as i32 - 1)
+                (lod_rounded as i32).clamp(0, mips as i32 - 1)
             }
-            SamplerFilter::Trilinear => ((lod as f32).floor() as i32).clamp(0, mips as i32 - 1),
+            SamplerFilter::Trilinear => (lod_floored as i32).clamp(0, mips as i32 - 1),
         };
         let mip0 = &texture.mips[mip0_index as usize];
         let texels0 = unsafe { texture.texels.as_ptr().add(mip0.offset as usize) };
         let log2_size = mip0.width.trailing_zeros() as usize;
-        let entry = &SAMPLER_TABLE[filtering as usize][texture.format as usize][log2_size];
+        let entry = match filtering {
+            SamplerFilter::Nearest => &NEAREST_SAMPLER_TABLE[texture.format as usize][log2_size],
+            SamplerFilter::Bilinear => &BILINEAR_SAMPLER_TABLE[texture.format as usize][log2_size],
+            SamplerFilter::DebugMip => &DEBUG_SAMPLER_TABLE[texture.format as usize][log2_size],
+            SamplerFilter::Trilinear => &TRILINEAR_SAMPLER_TABLE[texture.format as usize][log2_size][lod_fract_level],
+        };
         let sample_function = entry.f;
         let uv_scale = SamplerUVScale { bias: entry.b, scale: entry.s };
         Sampler { texels0, sample_function, uv_scale }
@@ -76,7 +87,7 @@ fn noop_sample(_texels: *const u8, _u: f32, _v: f32) -> RGBA {
 }
 
 fn sample_nearest<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32, v: f32) -> RGBA {
-    debug_assert!(u >= 0.0 && v >= 1.0);
+    debug_assert!(u >= 0.0 && v >= 0.0);
     let bpp: usize = bytes_per_pixel_u8(FORMAT);
     let stride: usize = SIZE as usize * bpp;
     let itx: i32 = unsafe { u.to_int_unchecked() };
@@ -101,7 +112,7 @@ fn sample_nearest<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32, 
 }
 
 fn sample_bilinear<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32, v: f32) -> RGBA {
-    debug_assert!(u >= 0.0 && v >= 1.0);
+    debug_assert!(u >= 0.0 && v >= 0.0);
     let bpp: usize = bytes_per_pixel_u8(FORMAT);
     let stride: usize = SIZE as usize * bpp;
     let itx: i32 = unsafe { u.to_int_unchecked() };
@@ -170,6 +181,150 @@ fn mip_size_sample<const SIZE: u16>(_texels: *const u8, _u: f32, _v: f32) -> RGB
     }
 }
 
+const TRILINEAR_FRACT_LEVELS: u32 = 16;
+const TRILINEAR_FRACT_LEVELS_LOG2: u32 = TRILINEAR_FRACT_LEVELS.ilog2();
+fn sample_trilinear<const MIP0_SIZE: u16, const FORMAT: u8, const FRACT: u32>(
+    mip0_texels: *const u8,
+    u: f32,
+    v: f32,
+) -> RGBA {
+    debug_assert!(u >= 0.0 && v >= 0.0);
+    debug_assert!(MIP0_SIZE >= 2);
+
+    // These are all compile-time constants, but the compiler doesn't allow to declare them as const
+    let mip0_size: u16 = MIP0_SIZE;
+    let mip1_size: u16 = MIP0_SIZE / 2;
+    let bpp: usize = bytes_per_pixel_u8(FORMAT);
+    let mip0_stride: usize = mip0_size as usize * bpp;
+    let mip1_stride: usize = mip1_size as usize * bpp;
+    let mip1_texels_offset: isize = (mip0_size as usize * mip0_size as usize * bpp) as isize;
+
+    // Convert input into 24.8 fixed-point biased into positive territory, minus half texel, and scaled by the tex size
+    let itx: i32 = unsafe { u.to_int_unchecked() };
+    let ity: i32 = unsafe { v.to_int_unchecked() };
+
+    // Extract coordinates, offsets and bilinears weights for the mip0 texels
+    let mip0_tx: u32 = itx as u32;
+    let mip0_ty: u32 = ity as u32;
+    let mip0_wx1: u32 = mip0_tx & 255;
+    let mip0_wx: u32 = 256 - mip0_wx1;
+    let mip0_wy1: u32 = mip0_ty & 255;
+    let mip0_wy: u32 = 256 - mip0_wy1;
+    let mip0_wa: u32 = mip0_wx * mip0_wy;
+    let mip0_wb: u32 = mip0_wx1 * mip0_wy;
+    let mip0_wc: u32 = mip0_wx * mip0_wy1;
+    let mip0_wd: u32 = mip0_wx1 * mip0_wy1;
+    let mip0_x0: u32 = mip0_tx >> 8;
+    let mip0_x1: u32 = mip0_x0 + 1;
+    let mip0_y0: u32 = mip0_ty >> 8;
+    let mip0_y1: u32 = mip0_y0 + 1;
+    let mip0_tx0: u32 = mip0_x0 & (mip0_size as u32 - 1);
+    let mip0_tx1: u32 = mip0_x1 & (mip0_size as u32 - 1);
+    let mip0_ty0: u32 = mip0_y0 & (mip0_size as u32 - 1);
+    let mip0_ty1: u32 = mip0_y1 & (mip0_size as u32 - 1);
+    let mip0_offset_a: usize = mip0_ty0 as usize * mip0_stride + mip0_tx0 as usize * bpp;
+    let mip0_offset_b: usize = mip0_ty0 as usize * mip0_stride + mip0_tx1 as usize * bpp;
+    let mip0_offset_c: usize = mip0_ty1 as usize * mip0_stride + mip0_tx0 as usize * bpp;
+    let mip0_offset_d: usize = mip0_ty1 as usize * mip0_stride + mip0_tx1 as usize * bpp;
+
+    // Extract coordinates, offsets and bilinears weights for the mip1 texels
+    let mip1_tx: u32 = (itx as u32 - 127) >> 1;
+    let mip1_ty: u32 = (ity as u32 - 127) >> 1;
+    let mip1_wx1: u32 = mip1_tx & 255;
+    let mip1_wx: u32 = 256 - mip1_wx1;
+    let mip1_wy1: u32 = mip1_ty & 255;
+    let mip1_wy: u32 = 256 - mip1_wy1;
+    let mip1_wa: u32 = mip1_wx * mip1_wy;
+    let mip1_wb: u32 = mip1_wx1 * mip1_wy;
+    let mip1_wc: u32 = mip1_wx * mip1_wy1;
+    let mip1_wd: u32 = mip1_wx1 * mip1_wy1;
+    let mip1_x0: u32 = mip1_tx >> 8;
+    let mip1_x1: u32 = mip1_x0 + 1;
+    let mip1_y0: u32 = mip1_ty >> 8;
+    let mip1_y1: u32 = mip1_y0 + 1;
+    let mip1_tx0: u32 = mip1_x0 & (mip1_size as u32 - 1);
+    let mip1_tx1: u32 = mip1_x1 & (mip1_size as u32 - 1);
+    let mip1_ty0: u32 = mip1_y0 & (mip1_size as u32 - 1);
+    let mip1_ty1: u32 = mip1_y1 & (mip1_size as u32 - 1);
+    let mip1_offset_a: usize = mip1_ty0 as usize * mip1_stride + mip1_tx0 as usize * bpp;
+    let mip1_offset_b: usize = mip1_ty0 as usize * mip1_stride + mip1_tx1 as usize * bpp;
+    let mip1_offset_c: usize = mip1_ty1 as usize * mip1_stride + mip1_tx0 as usize * bpp;
+    let mip1_offset_d: usize = mip1_ty1 as usize * mip1_stride + mip1_tx1 as usize * bpp;
+    let mip1_texels: *const u8 = unsafe { mip0_texels.offset(mip1_texels_offset) };
+    if FORMAT == TextureFormat::Grayscale as u8 {
+        // Fetch the texels
+        let mip0_a: u8 = unsafe { *mip0_texels.add(mip0_offset_a) };
+        let mip0_b: u8 = unsafe { *mip0_texels.add(mip0_offset_b) };
+        let mip0_c: u8 = unsafe { *mip0_texels.add(mip0_offset_c) };
+        let mip0_d: u8 = unsafe { *mip0_texels.add(mip0_offset_d) };
+        let mip1_a: u8 = unsafe { *mip1_texels.add(mip1_offset_a) };
+        let mip1_b: u8 = unsafe { *mip1_texels.add(mip1_offset_b) };
+        let mip1_c: u8 = unsafe { *mip1_texels.add(mip1_offset_c) };
+        let mip1_d: u8 = unsafe { *mip1_texels.add(mip1_offset_d) };
+
+        // Perform the bilinear interpolations
+        let mip0_abcd: u32 = (mip0_a as u32) * mip0_wa
+            + (mip0_b as u32) * mip0_wb
+            + (mip0_c as u32) * mip0_wc
+            + (mip0_d as u32) * mip0_wd;
+        let mip1_abcd: u32 = (mip1_a as u32) * mip1_wa
+            + (mip1_b as u32) * mip1_wb
+            + (mip1_c as u32) * mip1_wc
+            + (mip1_d as u32) * mip1_wd;
+
+        // Perform the linear interpolation
+        let result: u8 = ((mip0_abcd * (TRILINEAR_FRACT_LEVELS - FRACT) + mip1_abcd * FRACT)
+            >> (16 + TRILINEAR_FRACT_LEVELS_LOG2)) as u8;
+        return RGBA::new(result, result, result, 255);
+    }
+    if FORMAT == TextureFormat::RGB as u8 {
+        // Fetch the texels
+        let mip0_a: u32 = unsafe { (mip0_texels.add(mip0_offset_a) as *const u32).read_unaligned() };
+        let mip0_b: u32 = unsafe { (mip0_texels.add(mip0_offset_b) as *const u32).read_unaligned() };
+        let mip0_c: u32 = unsafe { (mip0_texels.add(mip0_offset_c) as *const u32).read_unaligned() };
+        let mip0_d: u32 = unsafe { (mip0_texels.add(mip0_offset_d) as *const u32).read_unaligned() };
+        let mip1_a: u32 = unsafe { (mip1_texels.add(mip1_offset_a) as *const u32).read_unaligned() };
+        let mip1_b: u32 = unsafe { (mip1_texels.add(mip1_offset_b) as *const u32).read_unaligned() };
+        let mip1_c: u32 = unsafe { (mip1_texels.add(mip1_offset_c) as *const u32).read_unaligned() };
+        let mip1_d: u32 = unsafe { (mip1_texels.add(mip1_offset_d) as *const u32).read_unaligned() };
+
+        // Perform the bilinear interpolations
+        let mip0_r: u32 = (mip0_a & 0xFF) * mip0_wa
+            + (mip0_b & 0xFF) * mip0_wb
+            + (mip0_c & 0xFF) * mip0_wc
+            + (mip0_d & 0xFF) * mip0_wd;
+        let mip0_g: u32 = ((mip0_a >> 8) & 0xFF) * mip0_wa
+            + ((mip0_b >> 8) & 0xFF) * mip0_wb
+            + ((mip0_c >> 8) & 0xFF) * mip0_wc
+            + ((mip0_d >> 8) & 0xFF) * mip0_wd;
+        let mip0_b: u32 = ((mip0_a >> 16) & 0xFF) * mip0_wa
+            + ((mip0_b >> 16) & 0xFF) * mip0_wb
+            + ((mip0_c >> 16) & 0xFF) * mip0_wc
+            + ((mip0_d >> 16) & 0xFF) * mip0_wd;
+        let mip1_r: u32 = (mip1_a & 0xFF) * mip1_wa
+            + (mip1_b & 0xFF) * mip1_wb
+            + (mip1_c & 0xFF) * mip1_wc
+            + (mip1_d & 0xFF) * mip1_wd;
+        let mip1_g: u32 = ((mip1_a >> 8) & 0xFF) * mip1_wa
+            + ((mip1_b >> 8) & 0xFF) * mip1_wb
+            + ((mip1_c >> 8) & 0xFF) * mip1_wc
+            + ((mip1_d >> 8) & 0xFF) * mip1_wd;
+        let mip1_b: u32 = ((mip1_a >> 16) & 0xFF) * mip1_wa
+            + ((mip1_b >> 16) & 0xFF) * mip1_wb
+            + ((mip1_c >> 16) & 0xFF) * mip1_wc
+            + ((mip1_d >> 16) & 0xFF) * mip1_wd;
+
+        // Perform the linear interpolations
+        let r: u32 = mip0_r * (TRILINEAR_FRACT_LEVELS - FRACT) + mip1_r * FRACT;
+        let g: u32 = mip0_g * (TRILINEAR_FRACT_LEVELS - FRACT) + mip1_g * FRACT;
+        let b: u32 = mip0_b * (TRILINEAR_FRACT_LEVELS - FRACT) + mip1_b * FRACT;
+        const SHIFT: u32 = 16 + TRILINEAR_FRACT_LEVELS_LOG2;
+        return RGBA::new((r >> SHIFT) as u8, (g >> SHIFT) as u8, (b >> SHIFT) as u8, 255);
+    }
+
+    RGBA::new(0, 0, 0, 255)
+}
+
 const fn bytes_per_pixel_u8(fmt: u8) -> usize {
     match fmt {
         x if x == TextureFormat::RGBA as u8 => 4,
@@ -181,7 +336,6 @@ const fn bytes_per_pixel_u8(fmt: u8) -> usize {
 
 const MAX_LOG2_SIZE: usize = 10; // up to 1024
 const FORMATS: usize = 3; // Grayscale, RGB, RGBA
-const FILTERS: usize = 3; // Nearest, Bilinear, Debug, (Trilinear later)
 
 #[derive(Debug, Copy, Clone)]
 struct SamplerEntry {
@@ -195,80 +349,163 @@ struct SamplerEntry {
     s: f32,
 }
 
-static SAMPLER_TABLE: [[[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS]; FILTERS] = {
-    let mut table = [[[SamplerEntry { f: noop_sample, b: 0.0, s: 1.0 }; MAX_LOG2_SIZE + 1]; FORMATS]; FILTERS];
-
+static NEAREST_SAMPLER_TABLE: [[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS] = {
+    let mut table = [[SamplerEntry { f: noop_sample, b: 0.0, s: 1.0 }; MAX_LOG2_SIZE + 1]; FORMATS];
     const GRAYSCALE: u8 = TextureFormat::Grayscale as u8;
     const RGB: u8 = TextureFormat::RGB as u8;
-    // const RGBA: u8 = TextureFormat::RGBA as u8;
     type SA = SamplerEntry;
+    let grs = &mut table[TextureFormat::Grayscale as usize];
+    grs[0] = SA { f: sample_nearest::<1, GRAYSCALE>, b: 10.0, s: 1.0 };
+    grs[1] = SA { f: sample_nearest::<2, GRAYSCALE>, b: 10.0, s: 2.0 };
+    grs[2] = SA { f: sample_nearest::<4, GRAYSCALE>, b: 10.0, s: 4.0 };
+    grs[3] = SA { f: sample_nearest::<8, GRAYSCALE>, b: 10.0, s: 8.0 };
+    grs[4] = SA { f: sample_nearest::<16, GRAYSCALE>, b: 10.0, s: 16.0 };
+    grs[5] = SA { f: sample_nearest::<32, GRAYSCALE>, b: 10.0, s: 32.0 };
+    grs[6] = SA { f: sample_nearest::<64, GRAYSCALE>, b: 10.0, s: 64.0 };
+    grs[7] = SA { f: sample_nearest::<128, GRAYSCALE>, b: 10.0, s: 128.0 };
+    grs[8] = SA { f: sample_nearest::<256, GRAYSCALE>, b: 10.0, s: 256.0 };
+    grs[9] = SA { f: sample_nearest::<512, GRAYSCALE>, b: 10.0, s: 512.0 };
+    grs[10] = SA { f: sample_nearest::<1024, GRAYSCALE>, b: 10.0, s: 1024.0 };
+    let rgb = &mut table[TextureFormat::RGB as usize];
+    rgb[0] = SA { f: sample_nearest::<1, RGB>, b: 10.0, s: 1.0 };
+    rgb[1] = SA { f: sample_nearest::<2, RGB>, b: 10.0, s: 2.0 };
+    rgb[2] = SA { f: sample_nearest::<4, RGB>, b: 10.0, s: 4.0 };
+    rgb[3] = SA { f: sample_nearest::<8, RGB>, b: 10.0, s: 8.0 };
+    rgb[4] = SA { f: sample_nearest::<16, RGB>, b: 10.0, s: 16.0 };
+    rgb[5] = SA { f: sample_nearest::<32, RGB>, b: 10.0, s: 32.0 };
+    rgb[6] = SA { f: sample_nearest::<64, RGB>, b: 10.0, s: 64.0 };
+    rgb[7] = SA { f: sample_nearest::<128, RGB>, b: 10.0, s: 128.0 };
+    rgb[8] = SA { f: sample_nearest::<256, RGB>, b: 10.0, s: 256.0 };
+    rgb[9] = SA { f: sample_nearest::<512, RGB>, b: 10.0, s: 512.0 };
+    rgb[10] = SA { f: sample_nearest::<1024, RGB>, b: 10.0, s: 1024.0 };
+    table
+};
 
-    let nearest = &mut table[SamplerFilter::Nearest as usize];
-    let ngrs = &mut nearest[TextureFormat::Grayscale as usize];
-    ngrs[0] = SA { f: sample_nearest::<1, GRAYSCALE>, b: 10.0, s: 1.0 };
-    ngrs[1] = SA { f: sample_nearest::<2, GRAYSCALE>, b: 10.0, s: 2.0 };
-    ngrs[2] = SA { f: sample_nearest::<4, GRAYSCALE>, b: 10.0, s: 4.0 };
-    ngrs[3] = SA { f: sample_nearest::<8, GRAYSCALE>, b: 10.0, s: 8.0 };
-    ngrs[4] = SA { f: sample_nearest::<16, GRAYSCALE>, b: 10.0, s: 16.0 };
-    ngrs[5] = SA { f: sample_nearest::<32, GRAYSCALE>, b: 10.0, s: 32.0 };
-    ngrs[6] = SA { f: sample_nearest::<64, GRAYSCALE>, b: 10.0, s: 64.0 };
-    ngrs[7] = SA { f: sample_nearest::<128, GRAYSCALE>, b: 10.0, s: 128.0 };
-    ngrs[8] = SA { f: sample_nearest::<256, GRAYSCALE>, b: 10.0, s: 256.0 };
-    ngrs[9] = SA { f: sample_nearest::<512, GRAYSCALE>, b: 10.0, s: 512.0 };
-    ngrs[10] = SA { f: sample_nearest::<1024, GRAYSCALE>, b: 10.0, s: 1024.0 };
-    let nrgb = &mut nearest[TextureFormat::RGB as usize];
-    nrgb[0] = SA { f: sample_nearest::<1, RGB>, b: 10.0, s: 1.0 };
-    nrgb[1] = SA { f: sample_nearest::<2, RGB>, b: 10.0, s: 2.0 };
-    nrgb[2] = SA { f: sample_nearest::<4, RGB>, b: 10.0, s: 4.0 };
-    nrgb[3] = SA { f: sample_nearest::<8, RGB>, b: 10.0, s: 8.0 };
-    nrgb[4] = SA { f: sample_nearest::<16, RGB>, b: 10.0, s: 16.0 };
-    nrgb[5] = SA { f: sample_nearest::<32, RGB>, b: 10.0, s: 32.0 };
-    nrgb[6] = SA { f: sample_nearest::<64, RGB>, b: 10.0, s: 64.0 };
-    nrgb[7] = SA { f: sample_nearest::<128, RGB>, b: 10.0, s: 128.0 };
-    nrgb[8] = SA { f: sample_nearest::<256, RGB>, b: 10.0, s: 256.0 };
-    nrgb[9] = SA { f: sample_nearest::<512, RGB>, b: 10.0, s: 512.0 };
-    nrgb[10] = SA { f: sample_nearest::<1024, RGB>, b: 10.0, s: 1024.0 };
+static BILINEAR_SAMPLER_TABLE: [[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS] = {
+    let mut table = [[SamplerEntry { f: noop_sample, b: 0.0, s: 1.0 }; MAX_LOG2_SIZE + 1]; FORMATS];
+    const GRAYSCALE: u8 = TextureFormat::Grayscale as u8;
+    const RGB: u8 = TextureFormat::RGB as u8;
+    type SA = SamplerEntry;
+    let grs = &mut table[TextureFormat::Grayscale as usize];
+    grs[0] = SA { f: sample_bilinear::<1, GRAYSCALE>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
+    grs[1] = SA { f: sample_bilinear::<2, GRAYSCALE>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
+    grs[2] = SA { f: sample_bilinear::<4, GRAYSCALE>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
+    grs[3] = SA { f: sample_bilinear::<8, GRAYSCALE>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
+    grs[4] = SA { f: sample_bilinear::<16, GRAYSCALE>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
+    grs[5] = SA { f: sample_bilinear::<32, GRAYSCALE>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
+    grs[6] = SA { f: sample_bilinear::<64, GRAYSCALE>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
+    grs[7] = SA { f: sample_bilinear::<128, GRAYSCALE>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
+    grs[8] = SA { f: sample_bilinear::<256, GRAYSCALE>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
+    grs[9] = SA { f: sample_bilinear::<512, GRAYSCALE>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
+    grs[10] = SA { f: sample_bilinear::<1024, GRAYSCALE>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+    let rgb = &mut table[TextureFormat::RGB as usize];
+    rgb[0] = SA { f: sample_bilinear::<1, RGB>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
+    rgb[1] = SA { f: sample_bilinear::<2, RGB>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
+    rgb[2] = SA { f: sample_bilinear::<4, RGB>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
+    rgb[3] = SA { f: sample_bilinear::<8, RGB>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
+    rgb[4] = SA { f: sample_bilinear::<16, RGB>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
+    rgb[5] = SA { f: sample_bilinear::<32, RGB>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
+    rgb[6] = SA { f: sample_bilinear::<64, RGB>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
+    rgb[7] = SA { f: sample_bilinear::<128, RGB>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
+    rgb[8] = SA { f: sample_bilinear::<256, RGB>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
+    rgb[9] = SA { f: sample_bilinear::<512, RGB>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
+    rgb[10] = SA { f: sample_bilinear::<1024, RGB>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+    table
+};
 
-    let bilinear = &mut table[SamplerFilter::Bilinear as usize];
-    let bgrs = &mut bilinear[TextureFormat::Grayscale as usize];
-    bgrs[0] = SA { f: sample_bilinear::<1, GRAYSCALE>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
-    bgrs[1] = SA { f: sample_bilinear::<2, GRAYSCALE>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
-    bgrs[2] = SA { f: sample_bilinear::<4, GRAYSCALE>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
-    bgrs[3] = SA { f: sample_bilinear::<8, GRAYSCALE>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
-    bgrs[4] = SA { f: sample_bilinear::<16, GRAYSCALE>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
-    bgrs[5] = SA { f: sample_bilinear::<32, GRAYSCALE>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
-    bgrs[6] = SA { f: sample_bilinear::<64, GRAYSCALE>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
-    bgrs[7] = SA { f: sample_bilinear::<128, GRAYSCALE>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
-    bgrs[8] = SA { f: sample_bilinear::<256, GRAYSCALE>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
-    bgrs[9] = SA { f: sample_bilinear::<512, GRAYSCALE>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
-    bgrs[10] = SA { f: sample_bilinear::<1024, GRAYSCALE>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
-    let brgb = &mut bilinear[TextureFormat::RGB as usize];
-    brgb[0] = SA { f: sample_bilinear::<1, RGB>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
-    brgb[1] = SA { f: sample_bilinear::<2, RGB>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
-    brgb[2] = SA { f: sample_bilinear::<4, RGB>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
-    brgb[3] = SA { f: sample_bilinear::<8, RGB>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
-    brgb[4] = SA { f: sample_bilinear::<16, RGB>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
-    brgb[5] = SA { f: sample_bilinear::<32, RGB>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
-    brgb[6] = SA { f: sample_bilinear::<64, RGB>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
-    brgb[7] = SA { f: sample_bilinear::<128, RGB>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
-    brgb[8] = SA { f: sample_bilinear::<256, RGB>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
-    brgb[9] = SA { f: sample_bilinear::<512, RGB>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
-    brgb[10] = SA { f: sample_bilinear::<1024, RGB>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+static DEBUG_SAMPLER_TABLE: [[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS] = {
+    let mut table = [[SamplerEntry { f: noop_sample, b: 0.0, s: 1.0 }; MAX_LOG2_SIZE + 1]; FORMATS];
+    type SA = SamplerEntry;
+    let grs = &mut table[TextureFormat::Grayscale as usize];
+    grs[0] = SA { f: mip_size_sample::<1>, b: 0.0, s: 1.0 };
+    grs[1] = SA { f: mip_size_sample::<2>, b: 0.0, s: 1.0 };
+    grs[2] = SA { f: mip_size_sample::<4>, b: 0.0, s: 1.0 };
+    grs[3] = SA { f: mip_size_sample::<8>, b: 0.0, s: 1.0 };
+    grs[4] = SA { f: mip_size_sample::<16>, b: 0.0, s: 1.0 };
+    grs[5] = SA { f: mip_size_sample::<32>, b: 0.0, s: 1.0 };
+    grs[6] = SA { f: mip_size_sample::<64>, b: 0.0, s: 1.0 };
+    grs[7] = SA { f: mip_size_sample::<128>, b: 0.0, s: 1.0 };
+    grs[8] = SA { f: mip_size_sample::<256>, b: 0.0, s: 1.0 };
+    grs[9] = SA { f: mip_size_sample::<512>, b: 0.0, s: 1.0 };
+    grs[10] = SA { f: mip_size_sample::<1024>, b: 0.0, s: 1.0 };
+    table[TextureFormat::RGB as usize] = table[TextureFormat::Grayscale as usize];
+    table
+};
 
-    let debug = &mut table[SamplerFilter::DebugMip as usize];
-    let dgrs = &mut debug[TextureFormat::Grayscale as usize];
-    dgrs[0] = SA { f: mip_size_sample::<1>, b: 0.0, s: 1.0 };
-    dgrs[1] = SA { f: mip_size_sample::<2>, b: 0.0, s: 1.0 };
-    dgrs[2] = SA { f: mip_size_sample::<4>, b: 0.0, s: 1.0 };
-    dgrs[3] = SA { f: mip_size_sample::<8>, b: 0.0, s: 1.0 };
-    dgrs[4] = SA { f: mip_size_sample::<16>, b: 0.0, s: 1.0 };
-    dgrs[5] = SA { f: mip_size_sample::<32>, b: 0.0, s: 1.0 };
-    dgrs[6] = SA { f: mip_size_sample::<64>, b: 0.0, s: 1.0 };
-    dgrs[7] = SA { f: mip_size_sample::<128>, b: 0.0, s: 1.0 };
-    dgrs[8] = SA { f: mip_size_sample::<256>, b: 0.0, s: 1.0 };
-    dgrs[9] = SA { f: mip_size_sample::<512>, b: 0.0, s: 1.0 };
-    dgrs[10] = SA { f: mip_size_sample::<1024>, b: 0.0, s: 1.0 };
-    debug[TextureFormat::RGB as usize] = debug[TextureFormat::Grayscale as usize];
+// Helper to repeat over fract levels
+macro_rules! for_each_fract {
+    ($mac:ident, $arr:ident[$idx:expr], $size:expr, $format:expr) => {
+        $mac!($arr[$idx], $size, $format, 0);
+        $mac!($arr[$idx], $size, $format, 1);
+        $mac!($arr[$idx], $size, $format, 2);
+        $mac!($arr[$idx], $size, $format, 3);
+        $mac!($arr[$idx], $size, $format, 4);
+        $mac!($arr[$idx], $size, $format, 5);
+        $mac!($arr[$idx], $size, $format, 6);
+        $mac!($arr[$idx], $size, $format, 7);
+        $mac!($arr[$idx], $size, $format, 8);
+        $mac!($arr[$idx], $size, $format, 9);
+        $mac!($arr[$idx], $size, $format, 10);
+        $mac!($arr[$idx], $size, $format, 11);
+        $mac!($arr[$idx], $size, $format, 12);
+        $mac!($arr[$idx], $size, $format, 13);
+        $mac!($arr[$idx], $size, $format, 14);
+        $mac!($arr[$idx], $size, $format, 15);
+    };
+}
+
+// Specialization of fill_trilinear_entries for each FRACT value
+macro_rules! fill_trilinear_entry {
+    ($arr:ident[$idx:expr], $size:expr, $format:expr, $fract:expr) => {
+        $arr[$idx][$fract] = SA {
+            f: sample_trilinear::<$size, $format, $fract>,
+            b: 10.0 - 127.0 / ($size as f32 * 256.0),
+            s: $size as f32 * 256.0,
+        };
+    };
+}
+
+static TRILINEAR_SAMPLER_TABLE: [[[SamplerEntry; TRILINEAR_FRACT_LEVELS as usize]; MAX_LOG2_SIZE + 1]; FORMATS] = {
+    let mut table = [[[SamplerEntry { f: noop_sample, b: 0.0, s: 1.0 }; TRILINEAR_FRACT_LEVELS as usize];
+        MAX_LOG2_SIZE + 1]; FORMATS];
+    const GRAYSCALE: u8 = TextureFormat::Grayscale as u8;
+    const RGB: u8 = TextureFormat::RGB as u8;
+    type SA = SamplerEntry;
+    let grs = &mut table[GRAYSCALE as usize];
+
+    // Sometimes Rust is really obnoxious: "cannot use `for` loop on `std::ops::Range<usize>` in statics"
+    let mut i: usize = 0;
+    while i < 16 {
+        grs[0][i] = SA { f: sample_nearest::<1, GRAYSCALE>, b: 10.0, s: 1.0 };
+        i += 1
+    }
+    for_each_fract!(fill_trilinear_entry, grs[1], 2, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[2], 4, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[3], 8, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[4], 16, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[5], 32, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[6], 64, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[7], 128, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[8], 256, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[9], 512, GRAYSCALE);
+    for_each_fract!(fill_trilinear_entry, grs[10], 1024, GRAYSCALE);
+
+    let rgb = &mut table[RGB as usize];
+    i = 0;
+    while i < 16 {
+        rgb[0][i] = SA { f: sample_nearest::<1, RGB>, b: 10.0, s: 1.0 };
+        i += 1
+    }
+    for_each_fract!(fill_trilinear_entry, rgb[1], 2, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[2], 4, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[3], 8, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[4], 16, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[5], 32, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[6], 64, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[7], 128, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[8], 256, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[9], 512, RGB);
+    for_each_fract!(fill_trilinear_entry, rgb[10], 1024, RGB);
 
     table
 };
@@ -277,6 +514,7 @@ static SAMPLER_TABLE: [[[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS]; FILTERS] = 
 mod tests {
     use super::*;
     use crate::render::{TextureFormat, TextureSource};
+    use std::sync::Arc;
 
     #[macro_export]
     macro_rules! assert_rgba_eq {
@@ -535,5 +773,121 @@ mod tests {
         assert_rgba_eq!(sampler.sample(0.50, 1.00), RGBA::new(127, 127, 127, 255), 2);
         assert_rgba_eq!(sampler.sample(0.75, 1.00), RGBA::new(127, 255, 127, 255), 2);
         assert_rgba_eq!(sampler.sample(1.00, 1.00), RGBA::new(127, 127, 127, 255), 2);
+    }
+
+    #[test]
+    fn test_sample_trilinear_from_2x2_grayscale_texture() {
+        // Mip 0:
+        // 1.0 0.0
+        // 0.0 0.0
+        // Mip 1:
+        // 0.5
+        let texels = vec![255u8, 0u8, 0u8, 0u8, 127u8, 0u8, 0u8, 0u8];
+        let mut mips: [Mip; MAX_MIP_LEVELS] = Default::default();
+        mips[0] = Mip { width: 2, height: 2, offset: 0 };
+        mips[1] = Mip { width: 1, height: 1, offset: 4 };
+        let texture = Arc::new(Texture { texels, count: 2, mips: mips, format: TextureFormat::Grayscale });
+        let e: i16 = 3;
+        {
+            let sampler = Sampler::new(&texture, SamplerFilter::Trilinear, 0.0);
+            assert_rgba_eq!(sampler.sample(0.25, 0.25), RGBA::new(255, 255, 255, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.25), RGBA::new(0, 0, 0, 255), e);
+            assert_rgba_eq!(sampler.sample(0.25, 0.75), RGBA::new(0, 0, 0, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.75), RGBA::new(0, 0, 0, 255), e);
+            assert_rgba_eq!(sampler.sample(0.50, 0.50), RGBA::new(64, 64, 64, 255), e);
+        }
+        {
+            let sampler = Sampler::new(&texture, SamplerFilter::Trilinear, 0.1);
+            assert_rgba_eq!(sampler.sample(0.25, 0.25), RGBA::new(242, 242, 242, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.25), RGBA::new(10, 10, 10, 255), e); // !
+            assert_rgba_eq!(sampler.sample(0.25, 0.75), RGBA::new(10, 10, 10, 255), e); // !
+            assert_rgba_eq!(sampler.sample(0.75, 0.75), RGBA::new(10, 10, 10, 255), e); // !
+            assert_rgba_eq!(sampler.sample(0.50, 0.50), RGBA::new(69, 69, 69, 255), e);
+        }
+        {
+            let sampler = Sampler::new(&texture, SamplerFilter::Trilinear, 0.5);
+            assert_rgba_eq!(sampler.sample(0.25, 0.25), RGBA::new(192, 192, 192, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.25), RGBA::new(64, 64, 64, 255), e);
+            assert_rgba_eq!(sampler.sample(0.25, 0.75), RGBA::new(64, 64, 64, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.75), RGBA::new(64, 64, 64, 255), e);
+            assert_rgba_eq!(sampler.sample(0.50, 0.50), RGBA::new(96, 96, 96, 255), e);
+        }
+        {
+            let sampler = Sampler::new(&texture, SamplerFilter::Trilinear, 0.9);
+            assert_rgba_eq!(sampler.sample(0.25, 0.25), RGBA::new(140, 140, 140, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.25), RGBA::new(114, 114, 114, 255), e);
+            assert_rgba_eq!(sampler.sample(0.25, 0.75), RGBA::new(114, 114, 114, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.75), RGBA::new(114, 114, 114, 255), e);
+            assert_rgba_eq!(sampler.sample(0.50, 0.50), RGBA::new(120, 120, 120, 255), e);
+        }
+        {
+            let sampler = Sampler::new(&texture, SamplerFilter::Trilinear, 1.0);
+            assert_rgba_eq!(sampler.sample(0.25, 0.25), RGBA::new(127, 127, 127, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.25), RGBA::new(127, 127, 127, 255), e);
+            assert_rgba_eq!(sampler.sample(0.25, 0.75), RGBA::new(127, 127, 127, 255), e);
+            assert_rgba_eq!(sampler.sample(0.75, 0.75), RGBA::new(127, 127, 127, 255), e);
+            assert_rgba_eq!(sampler.sample(0.50, 0.50), RGBA::new(127, 127, 127, 255), e);
+        }
+    }
+
+    #[test]
+    fn test_sample_trilinear_from_4x4_grayscale_texture() {
+        // Mip 0:
+        // 1.0 0.0 1.0 0.0
+        // 0.0 1.0 0.0 1.0
+        // 1.0 0.0 1.0 0.0
+        // 0.0 1.0 0.0 1.0
+        // Mip 1:
+        // 1.0 0.0
+        // 0.0 1.0
+        // Mip 2:
+        // 0.0
+        let texels = vec![
+            255u8, 0u8, 255u8, 0u8, 0u8, 255u8, 0u8, 255u8, 255u8, 0u8, 255u8, 0u8, 0u8, 255u8, 0u8, 255u8, //
+            255u8, 0u8, 0u8, 255u8, //
+            0u8, 0u8, 0u8, 0u8,
+        ];
+        let mut mips: [Mip; MAX_MIP_LEVELS] = Default::default();
+        mips[0] = Mip { width: 4, height: 4, offset: 0 };
+        mips[1] = Mip { width: 2, height: 2, offset: 16 };
+        mips[1] = Mip { width: 1, height: 1, offset: 20 };
+        let texture = Arc::new(Texture { texels, count: 3, mips: mips, format: TextureFormat::Grayscale });
+        let e: i16 = 5;
+        {
+            let sampler = Sampler::new(&texture, SamplerFilter::Trilinear, 0.0);
+            assert_rgba_eq!(sampler.sample(0.125, 0.125), RGBA::new(255, 255, 255, 255), e);
+            assert_rgba_eq!(sampler.sample(0.250, 0.125), RGBA::new(127, 127, 127, 255), e);
+            assert_rgba_eq!(sampler.sample(0.375, 0.125), RGBA::new(0, 0, 0, 255), e);
+        }
+        {
+            let sampler = Sampler::new(&texture, SamplerFilter::Trilinear, 0.9);
+            assert_rgba_eq!(sampler.sample(0.000, 0.250), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.125, 0.250), RGBA::new(185, 185, 185, 255), e);
+            assert_rgba_eq!(sampler.sample(0.250, 0.250), RGBA::new(242, 242, 242, 255), e);
+            assert_rgba_eq!(sampler.sample(0.375, 0.250), RGBA::new(187, 187, 187, 255), e); // should be 203 !!
+            assert_rgba_eq!(sampler.sample(0.500, 0.250), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.625, 0.250), RGBA::new(70, 70, 70, 255), e);
+            assert_rgba_eq!(sampler.sample(0.750, 0.250), RGBA::new(13, 13, 13, 255), e);
+            assert_rgba_eq!(sampler.sample(0.875, 0.250), RGBA::new(70, 70, 70, 255), e);
+            assert_rgba_eq!(sampler.sample(1.000, 0.250), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.000, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.125, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.250, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.375, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.500, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.625, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.750, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.875, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(1.000, 0.500), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.000, 0.750), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.125, 0.750), RGBA::new(70, 70, 70, 255), e);
+            assert_rgba_eq!(sampler.sample(0.250, 0.750), RGBA::new(13, 13, 13, 255), e);
+            assert_rgba_eq!(sampler.sample(0.375, 0.750), RGBA::new(70, 70, 70, 255), e);
+            assert_rgba_eq!(sampler.sample(0.500, 0.750), RGBA::new(126, 126, 126, 255), e);
+            assert_rgba_eq!(sampler.sample(0.625, 0.750), RGBA::new(187, 187, 187, 255), e); // should be 203 !!
+            assert_rgba_eq!(sampler.sample(0.750, 0.750), RGBA::new(242, 242, 242, 255), e);
+            assert_rgba_eq!(sampler.sample(0.875, 0.750), RGBA::new(185, 185, 185, 255), e);
+            assert_rgba_eq!(sampler.sample(1.000, 0.750), RGBA::new(126, 126, 126, 255), e);
+        }
     }
 }

@@ -15,7 +15,7 @@ pub struct TextureSource<'a> {
     pub format: TextureFormat,
 }
 
-const MAX_MIP_LEVELS: usize = 16;
+pub const MAX_MIP_LEVELS: usize = 16;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Mip {
@@ -30,7 +30,6 @@ impl Default for Mip {
     }
 }
 
-// #[derive(Debug, Clone, Copy)]
 #[derive(Debug)]
 pub struct Texture {
     pub texels: Vec<u8>,
