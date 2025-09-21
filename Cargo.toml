@@ -1,7 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["demo", "nih"]
+members = [
+    "demo",
+    "nih",
+    "examples/texture_filtering",
+]
 
 [profile.release]
-#lto = true
 debug = "full"
