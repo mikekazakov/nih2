@@ -150,10 +150,10 @@ impl Rasterizer {
                     ymax: (viewport.ymin + (y as u16 + 1) * Self::TILE_HEIGHT as u16).min(viewport.ymax),
                 };
                 tile.binning_bounds = TileBinningBounds {
-                    xmin_24_8: (x * Self::TILE_WIDTH) as i32 * 256 + 127,
-                    ymin_24_8: (y * Self::TILE_HEIGHT) as i32 * 256 + 127,
-                    xmax_24_8: (x * Self::TILE_WIDTH + Self::TILE_WIDTH - 1) as i32 * 256 + 127,
-                    ymax_24_8: (y * Self::TILE_HEIGHT + Self::TILE_HEIGHT - 1) as i32 * 256 + 127,
+                    xmin_24_8: (x * Self::TILE_WIDTH) as i32 * 256,
+                    ymin_24_8: (y * Self::TILE_HEIGHT) as i32 * 256,
+                    xmax_24_8: (x * Self::TILE_WIDTH + Self::TILE_WIDTH - 1) as i32 * 256 + 255,
+                    ymax_24_8: (y * Self::TILE_HEIGHT + Self::TILE_HEIGHT - 1) as i32 * 256 + 255,
                 };
             }
         }
@@ -1909,7 +1909,7 @@ mod tests_watertight {
             Vec4::new(0.0, 1.0, 0.0, 1.0),
         ];
         let mut rasterizer = Rasterizer::new();
-        for dim in 1..=126 {
+        for dim in 1..=512 {
             for wp in [&wp1, &wp2] {
                 let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(dim as u16, dim as u16);
                 color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
