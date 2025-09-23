@@ -1851,3 +1851,85 @@ mod tests_binning {
         }
     }
 }
+
+#[cfg(test)]
+mod tests_watertight {
+    use super::*;
+    use image::{ImageBuffer, Rgba};
+    use std::path::Path;
+
+    fn save_image<P: AsRef<Path>>(path: &P, image: &Buffer<u32>) {
+        let raw_rgba: Vec<u8> = image
+            .elems
+            .iter()
+            .flat_map(|&pixel| {
+                let bytes = pixel.to_le_bytes();
+                [bytes[0], bytes[1], bytes[2], bytes[3]]
+            })
+            .collect();
+        let img1: ImageBuffer<Rgba<u8>, _> =
+            ImageBuffer::from_raw(image.width as u32, image.height as u32, raw_rgba).unwrap();
+        img1.save(path).unwrap();
+    }
+
+    #[test]
+    fn fullscreen_quad() {
+        // v0--v2v3|
+        // |   //  |
+        // |  //   |
+        // | //    |
+        // v1v4---v5
+        let wp1 = vec![
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+        ];
+        // v0v5--v4
+        // | \\   |
+        // |  \\  |
+        // |   \\ |
+        // v1--v2v3
+        let wp2 = vec![
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(-1.0, 1.0, 0.0),
+        ];
+        let colors = vec![
+            Vec4::new(1.0, 0.0, 0.0, 1.0),
+            Vec4::new(1.0, 0.0, 0.0, 1.0),
+            Vec4::new(1.0, 0.0, 0.0, 1.0),
+            Vec4::new(0.0, 1.0, 0.0, 1.0),
+            Vec4::new(0.0, 1.0, 0.0, 1.0),
+            Vec4::new(0.0, 1.0, 0.0, 1.0),
+        ];
+        let mut rasterizer = Rasterizer::new();
+        for dim in 1..=126 {
+            for wp in [&wp1, &wp2] {
+                let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(dim as u16, dim as u16);
+                color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+                rasterizer.setup(Viewport::new(0, 0, dim as u16, dim as u16));
+                rasterizer.commit(&RasterizationCommand { world_positions: wp, colors: &colors, ..Default::default() });
+                rasterizer.draw(&mut Framebuffer { color_buffer: Some(&mut color_buffer), ..Default::default() });
+                let flat = color_buffer.as_flat_buffer();
+                let tight = flat.elems.iter().all(|&x| {
+                    let c = RGBA::from_u32(x);
+                    c.r > 0 || c.g > 0 || c.b > 0
+                });
+                if !tight {
+                    save_image(
+                        &Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join(format!("tests/fullscreen_quad_{0}x{0}.actual.png", dim)),
+                        &flat,
+                    );
+                }
+                assert!(tight);
+            }
+        }
+    }
+}
