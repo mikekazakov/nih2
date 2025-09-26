@@ -478,16 +478,12 @@ impl Rasterizer {
         }
     }
 
-    fn is_top_left(edge: Vec2) -> bool {
-        if edge.y < 0.0 {
-            return true; // left edge
-        }
-
-        if edge.y.abs() < 0.0001 && edge.x > 0.0 {
-            return true; // top edge
-        }
-
-        return false;
+    fn is_top_left_24_8(edge_x: i32, edge_y: i32) -> bool {
+        ( edge_y < 0 ) || // left edge
+        ( edge_y == 0 && edge_x > 0 ) // top edge
+        // NB!
+        // This says "an edge that is exactly horizontal", but perhaps some epsilon is still needed...
+        // https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-rasterizer-stage-rules
     }
 
     fn draw_triangles_dispatch(
@@ -611,13 +607,12 @@ impl Rasterizer {
             let sampler_uv_scale: SamplerUVScale = sampler.uv_scale();
 
             // Set up the edge function biases to follow the top-left fill rule
-            // TODO: migrate this calculation to fixed-point
-            let is_v01_top_left = Self::is_top_left(v01);
-            let is_v12_top_left = Self::is_top_left(v12);
-            let is_v20_top_left = Self::is_top_left(v20);
-            let v01_bias_x24_8 = if is_v01_top_left { 0 } else { -1 };
-            let v12_bias_x24_8 = if is_v12_top_left { 0 } else { -1 };
-            let v20_bias_x24_8 = if is_v20_top_left { 0 } else { -1 };
+            let is_v01_top_left: bool = Self::is_top_left_24_8(v01_x_24_8, v01_y_24_8);
+            let is_v12_top_left: bool = Self::is_top_left_24_8(v12_x_24_8, v12_y_24_8);
+            let is_v20_top_left: bool = Self::is_top_left_24_8(v20_x_24_8, v20_y_24_8);
+            let v01_bias_x24_8: i32 = if is_v01_top_left { 0 } else { -1 };
+            let v12_bias_x24_8: i32 = if is_v12_top_left { 0 } else { -1 };
+            let v20_bias_x24_8: i32 = if is_v20_top_left { 0 } else { -1 };
 
             let xmin = rt_xmin.max(v0_xy.x.min(v1_xy.x).min(v2_xy.x) as i32);
             let xmax = rt_xmax.min(v0_xy.x.max(v1_xy.x).max(v2_xy.x) as i32);
