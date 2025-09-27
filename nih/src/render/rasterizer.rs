@@ -708,39 +708,39 @@ impl Rasterizer {
             );
 
             // Precompute color/w start values and interpolation increments
-            let r_over_w_min = dot(edge_min_v3, r_over_w_v3);
-            let r_over_w_dx = dot(edge_dx_v3, r_over_w_v3);
-            let r_over_w_dy = dot(edge_dy_v3, r_over_w_v3);
-            let g_over_w_min = dot(edge_min_v3, g_over_w_v3);
-            let g_over_w_dx = dot(edge_dx_v3, g_over_w_v3);
-            let g_over_w_dy = dot(edge_dy_v3, g_over_w_v3);
-            let b_over_w_min = dot(edge_min_v3, b_over_w_v3);
-            let b_over_w_dx = dot(edge_dx_v3, b_over_w_v3);
-            let b_over_w_dy = dot(edge_dy_v3, b_over_w_v3);
+            let r_over_w_min: f32 = dot(edge_min_v3, r_over_w_v3);
+            let r_over_w_dx: f32 = dot(edge_dx_v3, r_over_w_v3);
+            let r_over_w_dy: f32 = dot(edge_dy_v3, r_over_w_v3);
+            let g_over_w_min: f32 = dot(edge_min_v3, g_over_w_v3);
+            let g_over_w_dx: f32 = dot(edge_dx_v3, g_over_w_v3);
+            let g_over_w_dy: f32 = dot(edge_dy_v3, g_over_w_v3);
+            let b_over_w_min: f32 = dot(edge_min_v3, b_over_w_v3);
+            let b_over_w_dx: f32 = dot(edge_dx_v3, b_over_w_v3);
+            let b_over_w_dy: f32 = dot(edge_dy_v3, b_over_w_v3);
 
             // Precompute normal/w start values and interpolation increments
-            let nx_over_w_min = dot(edge_min_v3, nx_over_w_v3);
-            let nx_over_w_dx = dot(edge_dx_v3, nx_over_w_v3);
-            let nx_over_w_dy = dot(edge_dy_v3, nx_over_w_v3);
-            let ny_over_w_min = dot(edge_min_v3, ny_over_w_v3);
-            let ny_over_w_dx = dot(edge_dx_v3, ny_over_w_v3);
-            let ny_over_w_dy = dot(edge_dy_v3, ny_over_w_v3);
-            let nz_over_w_min = dot(edge_min_v3, nz_over_w_v3);
-            let nz_over_w_dx = dot(edge_dx_v3, nz_over_w_v3);
-            let nz_over_w_dy = dot(edge_dy_v3, nz_over_w_v3);
+            let nx_over_w_min: f32 = dot(edge_min_v3, nx_over_w_v3);
+            let nx_over_w_dx: f32 = dot(edge_dx_v3, nx_over_w_v3);
+            let nx_over_w_dy: f32 = dot(edge_dy_v3, nx_over_w_v3);
+            let ny_over_w_min: f32 = dot(edge_min_v3, ny_over_w_v3);
+            let ny_over_w_dx: f32 = dot(edge_dx_v3, ny_over_w_v3);
+            let ny_over_w_dy: f32 = dot(edge_dy_v3, ny_over_w_v3);
+            let nz_over_w_min: f32 = dot(edge_min_v3, nz_over_w_v3);
+            let nz_over_w_dx: f32 = dot(edge_dx_v3, nz_over_w_v3);
+            let nz_over_w_dy: f32 = dot(edge_dy_v3, nz_over_w_v3);
 
             // Precompute texture coordinates start values and interpolation increments
-            let u_over_w_min = dot(edge_min_v3, u_over_w_v3);
-            let u_over_w_dx = dot(edge_dx_v3, u_over_w_v3);
-            let u_over_w_dy = dot(edge_dy_v3, u_over_w_v3);
-            let v_over_w_min = dot(edge_min_v3, v_over_w_v3);
-            let v_over_w_dx = dot(edge_dx_v3, v_over_w_v3);
-            let v_over_w_dy = dot(edge_dy_v3, v_over_w_v3);
+            let u_over_w_min: f32 = dot(edge_min_v3, u_over_w_v3);
+            let u_over_w_dx: f32 = dot(edge_dx_v3, u_over_w_v3);
+            let u_over_w_dy: f32 = dot(edge_dy_v3, u_over_w_v3);
+            let v_over_w_min: f32 = dot(edge_min_v3, v_over_w_v3);
+            let v_over_w_dx: f32 = dot(edge_dx_v3, v_over_w_v3);
+            let v_over_w_dy: f32 = dot(edge_dy_v3, v_over_w_v3);
 
             // Precompute 1/w start value and interpolation increments
-            let inv_w_min = dot(edge_min_v3, inv_w_v3);
-            let inv_w_dx = dot(edge_dx_v3, inv_w_v3);
-            let inv_w_dy = dot(edge_dy_v3, inv_w_v3);
+            let inv_w_min: f32 = dot(edge_min_v3, inv_w_v3);
+            let inv_w_dx: f32 = dot(edge_dx_v3, inv_w_v3);
+            let inv_w_dy: f32 = dot(edge_dy_v3, inv_w_v3);
 
             // Set up initial target pointers
             let mut color_row_ptr: *mut u32 = if HAS_COLOR_BUFFER {
@@ -781,34 +781,34 @@ impl Rasterizer {
             };
 
             // Set up the initial values at each consequent row
-            let mut edge0_row_24_8 = edge0_min_24_8; // starting v12 edgefunction value
-            let mut edge1_row_24_8 = edge1_min_24_8; // starting v20 edgefunction value
-            let mut edge2_row_24_8 = edge2_min_24_8; // starting v01 edgefunction value
-            let mut z_24_8_row = z_24_8_min; // starting depth
-            let mut r_over_w_row = r_over_w_min; // starting r/w
-            let mut g_over_w_row = g_over_w_min; // starting g/w
-            let mut b_over_w_row = b_over_w_min; // starting b/w
-            let mut nx_over_w_row = nx_over_w_min; // starting nx/w
-            let mut ny_over_w_row = ny_over_w_min; // starting ny/w
-            let mut nz_over_w_row = nz_over_w_min; // starting nz/w
-            let mut u_over_w_row = u_over_w_min; // starting u/w
-            let mut v_over_w_row = v_over_w_min; // starting v/w
-            let mut inv_w_row = inv_w_min; // starting 1/w
+            let mut edge0_row_24_8: i32 = edge0_min_24_8; // starting v12 edgefunction value
+            let mut edge1_row_24_8: i32 = edge1_min_24_8; // starting v20 edgefunction value
+            let mut edge2_row_24_8: i32 = edge2_min_24_8; // starting v01 edgefunction value
+            let mut z_24_8_row: u32 = z_24_8_min; // starting depth
+            let mut r_over_w_row: f32 = r_over_w_min; // starting r/w
+            let mut g_over_w_row: f32 = g_over_w_min; // starting g/w
+            let mut b_over_w_row: f32 = b_over_w_min; // starting b/w
+            let mut nx_over_w_row: f32 = nx_over_w_min; // starting nx/w
+            let mut ny_over_w_row: f32 = ny_over_w_min; // starting ny/w
+            let mut nz_over_w_row: f32 = nz_over_w_min; // starting nz/w
+            let mut u_over_w_row: f32 = u_over_w_min; // starting u/w
+            let mut v_over_w_row: f32 = v_over_w_min; // starting v/w
+            let mut inv_w_row: f32 = inv_w_min; // starting 1/w
 
             for _y in ymin..=ymax {
-                let mut edge0_24_8 = edge0_row_24_8;
-                let mut edge1_24_8 = edge1_row_24_8;
-                let mut edge2_24_8 = edge2_row_24_8;
-                let mut inv_w = inv_w_row;
-                let mut r_over_w = r_over_w_row;
-                let mut g_over_w = g_over_w_row;
-                let mut b_over_w = b_over_w_row;
-                let mut nx_over_w = nx_over_w_row;
-                let mut ny_over_w = ny_over_w_row;
-                let mut nz_over_w = nz_over_w_row;
-                let mut u_over_w = u_over_w_row;
-                let mut v_over_w = v_over_w_row;
-                let mut z_24_8 = z_24_8_row;
+                let mut edge0_24_8: i32 = edge0_row_24_8;
+                let mut edge1_24_8: i32 = edge1_row_24_8;
+                let mut edge2_24_8: i32 = edge2_row_24_8;
+                let mut inv_w: f32 = inv_w_row;
+                let mut r_over_w: f32 = r_over_w_row;
+                let mut g_over_w: f32 = g_over_w_row;
+                let mut b_over_w: f32 = b_over_w_row;
+                let mut nx_over_w: f32 = nx_over_w_row;
+                let mut ny_over_w: f32 = ny_over_w_row;
+                let mut nz_over_w: f32 = nz_over_w_row;
+                let mut u_over_w: f32 = u_over_w_row;
+                let mut v_over_w: f32 = v_over_w_row;
+                let mut z_24_8: u32 = z_24_8_row;
                 let mut color_ptr: *mut u32 = if HAS_COLOR_BUFFER {
                     color_row_ptr
                 } else {
@@ -827,10 +827,10 @@ impl Rasterizer {
 
                 for _x in xmin..=xmax {
                     if edge0_24_8 >= 0 && edge1_24_8 >= 0 && edge2_24_8 >= 0 {
-                        let mut discard = false;
+                        let mut discard: bool = false;
 
                         if HAS_DEPTH_BUFFER {
-                            let z_u16 = (z_24_8 >> 8) as u16;
+                            let z_u16: u16 = (z_24_8 >> 8) as u16;
                             unsafe {
                                 if z_u16 < *depth_ptr {
                                     *depth_ptr = z_u16;
@@ -840,26 +840,21 @@ impl Rasterizer {
                             }
                         }
 
-                        // A crude wireframe support might look like this:
-                        // if edge0_24x8 >= 4096 && edge1_24x8 >= 4096 && edge2_24x8 >= 4096 {
-                        //     discard = true;
-                        // }
-
                         if !discard {
-                            let inv_inv_w = 1.0 / inv_w;
+                            let inv_inv_w: f32 = 1.0 / inv_w;
 
                             if HAS_COLOR_BUFFER {
                                 let tex_fragment = if HAS_TEXTURE {
-                                    let u = u_over_w * inv_inv_w;
-                                    let v = v_over_w * inv_inv_w;
+                                    let u: f32 = u_over_w * inv_inv_w;
+                                    let v: f32 = v_over_w * inv_inv_w;
                                     sampler.sample_prescaled(u, v)
                                 } else {
                                     RGBA::new(255, 255, 255, 255)
                                 };
 
-                                let r = r_over_w * inv_inv_w;
-                                let g = g_over_w * inv_inv_w;
-                                let b = b_over_w * inv_inv_w;
+                                let r: f32 = r_over_w * inv_inv_w;
+                                let g: f32 = g_over_w * inv_inv_w;
+                                let b: f32 = b_over_w * inv_inv_w;
                                 let color = RGBA::new(
                                     (r * tex_fragment.r as f32).clamp(0.0, 255.0) as u8, //
                                     (g * tex_fragment.g as f32).clamp(0.0, 255.0) as u8, //
