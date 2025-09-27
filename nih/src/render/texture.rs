@@ -73,6 +73,16 @@ impl Texture {
         // Copy base level
         texel_data[..source.texels.len()].copy_from_slice(&source.texels);
 
+        // Premultiply alpha
+        if source.format == TextureFormat::RGBA {
+            for i in 0..source.texels.len() / 4 {
+                let a = texel_data[i * 4 + 3] as u32;
+                texel_data[i * 4 + 0] = (texel_data[i * 4 + 0] as u32 * a / 255) as u8;
+                texel_data[i * 4 + 1] = (texel_data[i * 4 + 1] as u32 * a / 255) as u8;
+                texel_data[i * 4 + 2] = (texel_data[i * 4 + 2] as u32 * a / 255) as u8;
+            }
+        }
+
         // Generate mip levels
         for level in 1..mip_count {
             let src_mip = mips[level - 1];
@@ -122,7 +132,6 @@ fn bytes_per_pixel(fmt: TextureFormat) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn bake_grayscale_1x1() {
         let texel = [42u8];
@@ -205,4 +214,6 @@ mod tests {
         assert_eq!(texture.mips[2].offset, 60);
         assert_eq!(texture.texels[60..63], [23u8, 24u8, 25u8]);
     }
+
+    // TODO: tests for RGBA baking
 }

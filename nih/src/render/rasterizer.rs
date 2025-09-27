@@ -193,6 +193,13 @@ impl Rasterizer {
         let viewport_scale = self.viewport_scale;
         let scheduled_vertices_start = self.vertices.len();
 
+        let command_color_alpha_premul: Vec4 = Vec4::new(
+            command.color.x * command.color.w,
+            command.color.y * command.color.w,
+            command.color.z * command.color.w,
+            command.color.w,
+        );
+
         for i in 0..input_triangles_num {
             let index = |n: usize| {
                 if use_explicit_indices {
@@ -225,13 +232,29 @@ impl Rasterizer {
                 input_vertices[2].normal = (normal_matrix * command.normals[i2]).normalized();
             }
             if command.colors.is_empty() {
-                input_vertices[0].color = command.color;
-                input_vertices[1].color = command.color;
-                input_vertices[2].color = command.color;
+                input_vertices[0].color = command_color_alpha_premul;
+                input_vertices[1].color = command_color_alpha_premul;
+                input_vertices[2].color = command_color_alpha_premul;
             } else {
-                input_vertices[0].color = command.colors[i0] * command.color;
-                input_vertices[1].color = command.colors[i1] * command.color;
-                input_vertices[2].color = command.colors[i2] * command.color;
+                // TODO: branch out if command_color_alpha_premul==(1,1,1,1)
+                input_vertices[0].color = Vec4::new(
+                    command.colors[i0].x * command.colors[i0].w * command_color_alpha_premul.x,
+                    command.colors[i0].y * command.colors[i0].w * command_color_alpha_premul.y,
+                    command.colors[i0].z * command.colors[i0].w * command_color_alpha_premul.z,
+                    command.colors[i0].w * command_color_alpha_premul.w,
+                );
+                input_vertices[1].color = Vec4::new(
+                    command.colors[i1].x * command.colors[i1].w * command_color_alpha_premul.x,
+                    command.colors[i1].y * command.colors[i1].w * command_color_alpha_premul.y,
+                    command.colors[i1].z * command.colors[i1].w * command_color_alpha_premul.z,
+                    command.colors[i1].w * command_color_alpha_premul.w,
+                );
+                input_vertices[2].color = Vec4::new(
+                    command.colors[i2].x * command.colors[i2].w * command_color_alpha_premul.x,
+                    command.colors[i2].y * command.colors[i2].w * command_color_alpha_premul.y,
+                    command.colors[i2].z * command.colors[i2].w * command_color_alpha_premul.z,
+                    command.colors[i2].w * command_color_alpha_premul.w,
+                );
             }
             if command.tex_coords.is_empty() {
                 input_vertices[0].tex_coord = Vec2::new(0.0, 0.0);
@@ -894,9 +917,9 @@ impl Rasterizer {
                                 let dest: RGBA = RGBA::from_u32(unsafe { *color_ptr });
                                 let inv_a: u32 = (255 - a) as u32;
                                 RGBA::new(
-                                    ((r as u32 * a as u32 + dest.r as u32 * inv_a) >> 8) as u8,
-                                    ((g as u32 * a as u32 + dest.g as u32 * inv_a) >> 8) as u8,
-                                    ((b as u32 * a as u32 + dest.b as u32 * inv_a) >> 8) as u8,
+                                    r + ((dest.r as u32 * inv_a) / 255) as u8,
+                                    g + ((dest.g as u32 * inv_a) / 255) as u8,
+                                    b + ((dest.b as u32 * inv_a) / 255) as u8,
                                     255,
                                 )
                                 .to_u32()
