@@ -2220,6 +2220,344 @@ mod tests {
         };
         assert_albedo_against_reference(&render_to_64x64_albedo_wbg(&command), filename);
     }
+
+    #[rstest]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_red_solid_00.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/tex_red_solid_01.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/tex_red_solid_02.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/tex_red_solid_03.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/tex_red_solid_04.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/tex_red_solid_05.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/tex_red_solid_06.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/tex_red_solid_07.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/tex_red_solid_08.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/tex_red_solid_09.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_red_solid_10.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 1.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_red_solid_11.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.9),
+        Vec4::new(0.0, 1.0, 0.0, 0.9),
+        Vec4::new(0.0, 0.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/tex_red_solid_12.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.8),
+        Vec4::new(0.0, 1.0, 0.0, 0.8),
+        Vec4::new(0.0, 0.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/tex_red_solid_13.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.7),
+        Vec4::new(0.0, 1.0, 0.0, 0.7),
+        Vec4::new(0.0, 0.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/tex_red_solid_14.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.6),
+        Vec4::new(0.0, 1.0, 0.0, 0.6),
+        Vec4::new(0.0, 0.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/tex_red_solid_15.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.5),
+        Vec4::new(0.0, 1.0, 0.0, 0.5),
+        Vec4::new(0.0, 0.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/tex_red_solid_16.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.4),
+        Vec4::new(0.0, 1.0, 0.0, 0.4),
+        Vec4::new(0.0, 0.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/tex_red_solid_17.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.3),
+        Vec4::new(0.0, 1.0, 0.0, 0.3),
+        Vec4::new(0.0, 0.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/tex_red_solid_18.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.2),
+        Vec4::new(0.0, 1.0, 0.0, 0.2),
+        Vec4::new(0.0, 0.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/tex_red_solid_19.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.1),
+        Vec4::new(0.0, 1.0, 0.0, 0.1),
+        Vec4::new(0.0, 0.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/tex_red_solid_20.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 1.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_red_solid_21.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_red_solid_22.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_red_solid_23.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_red_solid_24.png"
+    )]
+    fn alpha_blend_tex_red_solid(#[case] c0: Vec4, #[case] c1: Vec4, #[case] c2: Vec4, #[case] filename: &str) {
+        let texture = Texture::new(&TextureSource {
+            texels: &vec![255u8, 0u8, 0u8],
+            width: 1,
+            height: 1,
+            format: TextureFormat::RGB,
+        });
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
+            tex_coords: &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0)],
+            texture: Some(texture),
+            colors: &[c0, c1, c2],
+            alpha_blending: true,
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
+    }
+
+    #[rstest]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_mixed_solid_00.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/tex_mixed_solid_01.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/tex_mixed_solid_02.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/tex_mixed_solid_03.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/tex_mixed_solid_04.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/tex_mixed_solid_05.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/tex_mixed_solid_06.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/tex_mixed_solid_07.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/tex_mixed_solid_08.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/tex_mixed_solid_09.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_mixed_solid_10.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 1.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_mixed_solid_11.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.9),
+        Vec4::new(0.0, 1.0, 0.0, 0.9),
+        Vec4::new(0.0, 0.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/tex_mixed_solid_12.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.8),
+        Vec4::new(0.0, 1.0, 0.0, 0.8),
+        Vec4::new(0.0, 0.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/tex_mixed_solid_13.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.7),
+        Vec4::new(0.0, 1.0, 0.0, 0.7),
+        Vec4::new(0.0, 0.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/tex_mixed_solid_14.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.6),
+        Vec4::new(0.0, 1.0, 0.0, 0.6),
+        Vec4::new(0.0, 0.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/tex_mixed_solid_15.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.5),
+        Vec4::new(0.0, 1.0, 0.0, 0.5),
+        Vec4::new(0.0, 0.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/tex_mixed_solid_16.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.4),
+        Vec4::new(0.0, 1.0, 0.0, 0.4),
+        Vec4::new(0.0, 0.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/tex_mixed_solid_17.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.3),
+        Vec4::new(0.0, 1.0, 0.0, 0.3),
+        Vec4::new(0.0, 0.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/tex_mixed_solid_18.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.2),
+        Vec4::new(0.0, 1.0, 0.0, 0.2),
+        Vec4::new(0.0, 0.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/tex_mixed_solid_19.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.1),
+        Vec4::new(0.0, 1.0, 0.0, 0.1),
+        Vec4::new(0.0, 0.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/tex_mixed_solid_20.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 1.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_mixed_solid_21.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_mixed_solid_22.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_mixed_solid_23.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_mixed_solid_24.png"
+    )]
+    fn alpha_blend_tex_mixed_solid(#[case] c0: Vec4, #[case] c1: Vec4, #[case] c2: Vec4, #[case] filename: &str) {
+        let texture = Texture::new(&TextureSource {
+            texels: &vec![0x0Bu8, 0xDAu8, 0x51u8],
+            width: 1,
+            height: 1,
+            format: TextureFormat::RGB,
+        });
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
+            tex_coords: &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0)],
+            texture: Some(texture),
+            colors: &[c0, c1, c2],
+            alpha_blending: true,
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo_wbg(&command), filename);
+    }
 }
 
 #[cfg(test)]
