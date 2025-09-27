@@ -1303,6 +1303,16 @@ mod tests {
         color_buffer.as_flat_buffer()
     }
 
+    fn render_to_64x64_albedo_wbg(command: &RasterizationCommand) -> Buffer<u32> {
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(64, 64);
+        color_buffer.fill(RGBA::new(255, 255, 255, 255).to_u32());
+        let mut rasterizer = Rasterizer::new();
+        rasterizer.setup(Viewport::new(0, 0, 64, 64));
+        rasterizer.commit(&command);
+        rasterizer.draw(&mut Framebuffer { color_buffer: Some(&mut color_buffer), ..Framebuffer::default() });
+        color_buffer.as_flat_buffer()
+    }
+
     fn render_to_256x256_albedo(command: &RasterizationCommand) -> Buffer<u32> {
         let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(256, 256);
         color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
@@ -2048,6 +2058,167 @@ mod tests {
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
+    }
+
+    #[rstest]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 0.0, 1.0),
+        "rasterizer/alpha_blend/vert_simple_wbg_00.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.9),
+        Vec4::new(0.0, 0.0, 0.0, 0.9),
+        Vec4::new(0.0, 0.0, 0.0, 0.9),
+        "rasterizer/alpha_blend/vert_simple_wbg_01.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.8),
+        Vec4::new(0.0, 0.0, 0.0, 0.8),
+        Vec4::new(0.0, 0.0, 0.0, 0.8),
+        "rasterizer/alpha_blend/vert_simple_wbg_02.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.7),
+        Vec4::new(0.0, 0.0, 0.0, 0.7),
+        Vec4::new(0.0, 0.0, 0.0, 0.7),
+        "rasterizer/alpha_blend/vert_simple_wbg_03.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.6),
+        Vec4::new(0.0, 0.0, 0.0, 0.6),
+        Vec4::new(0.0, 0.0, 0.0, 0.6),
+        "rasterizer/alpha_blend/vert_simple_wbg_04.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.5),
+        Vec4::new(0.0, 0.0, 0.0, 0.5),
+        Vec4::new(0.0, 0.0, 0.0, 0.5),
+        "rasterizer/alpha_blend/vert_simple_wbg_05.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.4),
+        Vec4::new(0.0, 0.0, 0.0, 0.4),
+        Vec4::new(0.0, 0.0, 0.0, 0.4),
+        "rasterizer/alpha_blend/vert_simple_wbg_06.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.3),
+        Vec4::new(0.0, 0.0, 0.0, 0.3),
+        Vec4::new(0.0, 0.0, 0.0, 0.3),
+        "rasterizer/alpha_blend/vert_simple_wbg_07.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.2),
+        Vec4::new(0.0, 0.0, 0.0, 0.2),
+        Vec4::new(0.0, 0.0, 0.0, 0.2),
+        "rasterizer/alpha_blend/vert_simple_wbg_08.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.1),
+        Vec4::new(0.0, 0.0, 0.0, 0.1),
+        Vec4::new(0.0, 0.0, 0.0, 0.1),
+        "rasterizer/alpha_blend/vert_simple_wbg_09.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        "rasterizer/alpha_blend/vert_simple_wbg_10.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 1.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/vert_simple_wbg_11.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.9),
+        Vec4::new(0.0, 1.0, 0.0, 0.9),
+        Vec4::new(0.0, 0.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/vert_simple_wbg_12.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.8),
+        Vec4::new(0.0, 1.0, 0.0, 0.8),
+        Vec4::new(0.0, 0.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/vert_simple_wbg_13.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.7),
+        Vec4::new(0.0, 1.0, 0.0, 0.7),
+        Vec4::new(0.0, 0.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/vert_simple_wbg_14.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.6),
+        Vec4::new(0.0, 1.0, 0.0, 0.6),
+        Vec4::new(0.0, 0.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/vert_simple_wbg_15.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.5),
+        Vec4::new(0.0, 1.0, 0.0, 0.5),
+        Vec4::new(0.0, 0.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/vert_simple_wbg_16.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.4),
+        Vec4::new(0.0, 1.0, 0.0, 0.4),
+        Vec4::new(0.0, 0.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/vert_simple_wbg_17.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.3),
+        Vec4::new(0.0, 1.0, 0.0, 0.3),
+        Vec4::new(0.0, 0.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/vert_simple_wbg_18.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.2),
+        Vec4::new(0.0, 1.0, 0.0, 0.2),
+        Vec4::new(0.0, 0.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/vert_simple_wbg_19.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.1),
+        Vec4::new(0.0, 1.0, 0.0, 0.1),
+        Vec4::new(0.0, 0.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/vert_simple_wbg_20.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 1.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/vert_simple_wbg_21.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        "rasterizer/alpha_blend/vert_simple_wbg_22.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        "rasterizer/alpha_blend/vert_simple_wbg_23.png"
+    )]
+    #[case(
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.0, 1.0),
+        "rasterizer/alpha_blend/vert_simple_wbg_24.png"
+    )]
+    fn alpha_blend_simple_wbg(#[case] c0: Vec4, #[case] c1: Vec4, #[case] c2: Vec4, #[case] filename: &str) {
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
+            colors: &[c0, c1, c2],
+            alpha_blending: true,
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo_wbg(&command), filename);
     }
 }
 
