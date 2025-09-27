@@ -33,10 +33,14 @@ pub struct RasterizationCommand<'a> {
     pub culling: CullMode,
     pub color: Vec4,
     pub texture: Option<std::sync::Arc<Texture>>,
+
+    // Set the filter to be used when sampling the texture.
+    // Default: nearest.
     pub sampling_filter: SamplerFilter,
 
     // Sets whether the rasterizer should use alpha blending when writing fragments to the framebuffer.
     // If disabled, the fragment color will be written as is.
+    // Default: disabled.
     pub alpha_blending: bool,
 }
 
@@ -2547,6 +2551,175 @@ mod tests {
             width: 1,
             height: 1,
             format: TextureFormat::RGB,
+        });
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
+            tex_coords: &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0)],
+            texture: Some(texture),
+            colors: &[c0, c1, c2],
+            alpha_blending: true,
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo_wbg(&command), filename);
+    }
+
+    #[rstest]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_purple_half_00.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/tex_purple_half_01.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/tex_purple_half_02.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/tex_purple_half_03.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/tex_purple_half_04.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/tex_purple_half_05.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/tex_purple_half_06.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/tex_purple_half_07.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/tex_purple_half_08.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/tex_purple_half_09.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_purple_half_10.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 1.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_purple_half_11.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.9),
+        Vec4::new(0.0, 1.0, 0.0, 0.9),
+        Vec4::new(0.0, 0.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/tex_purple_half_12.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.8),
+        Vec4::new(0.0, 1.0, 0.0, 0.8),
+        Vec4::new(0.0, 0.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/tex_purple_half_13.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.7),
+        Vec4::new(0.0, 1.0, 0.0, 0.7),
+        Vec4::new(0.0, 0.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/tex_purple_half_14.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.6),
+        Vec4::new(0.0, 1.0, 0.0, 0.6),
+        Vec4::new(0.0, 0.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/tex_purple_half_15.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.5),
+        Vec4::new(0.0, 1.0, 0.0, 0.5),
+        Vec4::new(0.0, 0.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/tex_purple_half_16.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.4),
+        Vec4::new(0.0, 1.0, 0.0, 0.4),
+        Vec4::new(0.0, 0.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/tex_purple_half_17.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.3),
+        Vec4::new(0.0, 1.0, 0.0, 0.3),
+        Vec4::new(0.0, 0.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/tex_purple_half_18.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.2),
+        Vec4::new(0.0, 1.0, 0.0, 0.2),
+        Vec4::new(0.0, 0.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/tex_purple_half_19.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.1),
+        Vec4::new(0.0, 1.0, 0.0, 0.1),
+        Vec4::new(0.0, 0.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/tex_purple_half_20.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 1.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_purple_half_21.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_purple_half_22.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/tex_purple_half_23.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/tex_purple_half_24.png"
+    )]
+    fn alpha_blend_tex_purple_half(#[case] c0: Vec4, #[case] c1: Vec4, #[case] c2: Vec4, #[case] filename: &str) {
+        let texture = Texture::new(&TextureSource {
+            texels: &vec![0x93u8, 0x70u8, 0xDBu8, 0x7Fu8],
+            width: 1,
+            height: 1,
+            format: TextureFormat::RGBA,
         });
         let command = RasterizationCommand {
             world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],

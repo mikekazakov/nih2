@@ -101,12 +101,10 @@ fn sample_nearest<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32, 
         return RGBA::new(c, c, c, 255);
     }
     if FORMAT == TextureFormat::RGB as u8 {
-        let r: u8 = unsafe { *texel.add(0) };
-        let g: u8 = unsafe { *texel.add(1) };
-        let b: u8 = unsafe { *texel.add(2) };
-        return RGBA::new(r, g, b, 255);
-        // Somehow this is slower than the above code:
-        // return RGBA::from_u32( unsafe { (texel as *const u32).read_unaligned() } | 0xFF000000 );
+        return RGBA::from_u32(unsafe { (texel as *const u32).read_unaligned() } | 0xFF000000);
+    }
+    if FORMAT == TextureFormat::RGBA as u8 {
+        return RGBA::from_u32(unsafe { *(texel as *const u32) });
     }
     RGBA::new(0, 0, 0, 255)
 }
@@ -351,33 +349,46 @@ struct SamplerEntry {
 
 static NEAREST_SAMPLER_TABLE: [[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS] = {
     let mut table = [[SamplerEntry { f: noop_sample, b: 0.0, s: 1.0 }; MAX_LOG2_SIZE + 1]; FORMATS];
-    const GRAYSCALE: u8 = TextureFormat::Grayscale as u8;
-    const RGB: u8 = TextureFormat::RGB as u8;
+    const TF_GRS: u8 = TextureFormat::Grayscale as u8;
+    const TF_RGB: u8 = TextureFormat::RGB as u8;
+    const TF_RGBA: u8 = TextureFormat::RGBA as u8;
     type SA = SamplerEntry;
     let grs = &mut table[TextureFormat::Grayscale as usize];
-    grs[0] = SA { f: sample_nearest::<1, GRAYSCALE>, b: 10.0, s: 1.0 };
-    grs[1] = SA { f: sample_nearest::<2, GRAYSCALE>, b: 10.0, s: 2.0 };
-    grs[2] = SA { f: sample_nearest::<4, GRAYSCALE>, b: 10.0, s: 4.0 };
-    grs[3] = SA { f: sample_nearest::<8, GRAYSCALE>, b: 10.0, s: 8.0 };
-    grs[4] = SA { f: sample_nearest::<16, GRAYSCALE>, b: 10.0, s: 16.0 };
-    grs[5] = SA { f: sample_nearest::<32, GRAYSCALE>, b: 10.0, s: 32.0 };
-    grs[6] = SA { f: sample_nearest::<64, GRAYSCALE>, b: 10.0, s: 64.0 };
-    grs[7] = SA { f: sample_nearest::<128, GRAYSCALE>, b: 10.0, s: 128.0 };
-    grs[8] = SA { f: sample_nearest::<256, GRAYSCALE>, b: 10.0, s: 256.0 };
-    grs[9] = SA { f: sample_nearest::<512, GRAYSCALE>, b: 10.0, s: 512.0 };
-    grs[10] = SA { f: sample_nearest::<1024, GRAYSCALE>, b: 10.0, s: 1024.0 };
+    grs[0] = SA { f: sample_nearest::<1, TF_GRS>, b: 10.0, s: 1.0 };
+    grs[1] = SA { f: sample_nearest::<2, TF_GRS>, b: 10.0, s: 2.0 };
+    grs[2] = SA { f: sample_nearest::<4, TF_GRS>, b: 10.0, s: 4.0 };
+    grs[3] = SA { f: sample_nearest::<8, TF_GRS>, b: 10.0, s: 8.0 };
+    grs[4] = SA { f: sample_nearest::<16, TF_GRS>, b: 10.0, s: 16.0 };
+    grs[5] = SA { f: sample_nearest::<32, TF_GRS>, b: 10.0, s: 32.0 };
+    grs[6] = SA { f: sample_nearest::<64, TF_GRS>, b: 10.0, s: 64.0 };
+    grs[7] = SA { f: sample_nearest::<128, TF_GRS>, b: 10.0, s: 128.0 };
+    grs[8] = SA { f: sample_nearest::<256, TF_GRS>, b: 10.0, s: 256.0 };
+    grs[9] = SA { f: sample_nearest::<512, TF_GRS>, b: 10.0, s: 512.0 };
+    grs[10] = SA { f: sample_nearest::<1024, TF_GRS>, b: 10.0, s: 1024.0 };
     let rgb = &mut table[TextureFormat::RGB as usize];
-    rgb[0] = SA { f: sample_nearest::<1, RGB>, b: 10.0, s: 1.0 };
-    rgb[1] = SA { f: sample_nearest::<2, RGB>, b: 10.0, s: 2.0 };
-    rgb[2] = SA { f: sample_nearest::<4, RGB>, b: 10.0, s: 4.0 };
-    rgb[3] = SA { f: sample_nearest::<8, RGB>, b: 10.0, s: 8.0 };
-    rgb[4] = SA { f: sample_nearest::<16, RGB>, b: 10.0, s: 16.0 };
-    rgb[5] = SA { f: sample_nearest::<32, RGB>, b: 10.0, s: 32.0 };
-    rgb[6] = SA { f: sample_nearest::<64, RGB>, b: 10.0, s: 64.0 };
-    rgb[7] = SA { f: sample_nearest::<128, RGB>, b: 10.0, s: 128.0 };
-    rgb[8] = SA { f: sample_nearest::<256, RGB>, b: 10.0, s: 256.0 };
-    rgb[9] = SA { f: sample_nearest::<512, RGB>, b: 10.0, s: 512.0 };
-    rgb[10] = SA { f: sample_nearest::<1024, RGB>, b: 10.0, s: 1024.0 };
+    rgb[0] = SA { f: sample_nearest::<1, TF_RGB>, b: 10.0, s: 1.0 };
+    rgb[1] = SA { f: sample_nearest::<2, TF_RGB>, b: 10.0, s: 2.0 };
+    rgb[2] = SA { f: sample_nearest::<4, TF_RGB>, b: 10.0, s: 4.0 };
+    rgb[3] = SA { f: sample_nearest::<8, TF_RGB>, b: 10.0, s: 8.0 };
+    rgb[4] = SA { f: sample_nearest::<16, TF_RGB>, b: 10.0, s: 16.0 };
+    rgb[5] = SA { f: sample_nearest::<32, TF_RGB>, b: 10.0, s: 32.0 };
+    rgb[6] = SA { f: sample_nearest::<64, TF_RGB>, b: 10.0, s: 64.0 };
+    rgb[7] = SA { f: sample_nearest::<128, TF_RGB>, b: 10.0, s: 128.0 };
+    rgb[8] = SA { f: sample_nearest::<256, TF_RGB>, b: 10.0, s: 256.0 };
+    rgb[9] = SA { f: sample_nearest::<512, TF_RGB>, b: 10.0, s: 512.0 };
+    rgb[10] = SA { f: sample_nearest::<1024, TF_RGB>, b: 10.0, s: 1024.0 };
+    let rgba = &mut table[TextureFormat::RGBA as usize];
+    rgba[0] = SA { f: sample_nearest::<1, TF_RGBA>, b: 10.0, s: 1.0 };
+    rgba[1] = SA { f: sample_nearest::<2, TF_RGBA>, b: 10.0, s: 2.0 };
+    rgba[2] = SA { f: sample_nearest::<4, TF_RGBA>, b: 10.0, s: 4.0 };
+    rgba[3] = SA { f: sample_nearest::<8, TF_RGBA>, b: 10.0, s: 8.0 };
+    rgba[4] = SA { f: sample_nearest::<16, TF_RGBA>, b: 10.0, s: 16.0 };
+    rgba[5] = SA { f: sample_nearest::<32, TF_RGBA>, b: 10.0, s: 32.0 };
+    rgba[6] = SA { f: sample_nearest::<64, TF_RGBA>, b: 10.0, s: 64.0 };
+    rgba[7] = SA { f: sample_nearest::<128, TF_RGBA>, b: 10.0, s: 128.0 };
+    rgba[8] = SA { f: sample_nearest::<256, TF_RGBA>, b: 10.0, s: 256.0 };
+    rgba[9] = SA { f: sample_nearest::<512, TF_RGBA>, b: 10.0, s: 512.0 };
+    rgba[10] = SA { f: sample_nearest::<1024, TF_RGBA>, b: 10.0, s: 1024.0 };
     table
 };
 
