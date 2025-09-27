@@ -20,7 +20,7 @@ pub enum CullMode {
 #[derive(Debug, Clone)]
 pub struct RasterizationCommand<'a> {
     pub world_positions: &'a [Vec3],
-    pub normals: &'a [Vec3],    // empty if absent, will be derived automatically
+    pub normals: &'a [Vec3],    // if no normals are provided, they will be derived automatically
     pub tex_coords: &'a [Vec2], // empty if absent
     pub colors: &'a [Vec4],     // empty if absent, .color will be used
 
@@ -34,12 +34,17 @@ pub struct RasterizationCommand<'a> {
     pub color: Vec4,
     pub texture: Option<std::sync::Arc<Texture>>,
     pub sampling_filter: SamplerFilter,
+
+    // Sets whether the rasterizer should use alpha blending when writing fragments to the framebuffer.
+    // If disabled, the fragment color will be written as is.
+    pub alpha_blending: bool,
 }
 
 #[derive(Debug, Clone)]
 struct ScheduledCommand {
     texture: Option<std::sync::Arc<Texture>>,
     sampling_filter: SamplerFilter,
+    alpha_blending: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -295,8 +300,11 @@ impl Rasterizer {
         }
 
         // Reuse the last command or create a new one
-        let required_scheduled_command =
-            ScheduledCommand { texture: command_texture, sampling_filter: command.sampling_filter };
+        let required_scheduled_command = ScheduledCommand {
+            texture: command_texture,
+            sampling_filter: command.sampling_filter,
+            alpha_blending: command.alpha_blending,
+        };
         if self.commands.is_empty() || self.commands.last().unwrap() != &required_scheduled_command {
             self.commands.push(required_scheduled_command);
         }
@@ -506,15 +514,18 @@ impl Rasterizer {
                 [$( Rasterizer::draw_triangles::<$($a),+>, )+]
             };
         }
-        const DRAW_FUNCTIONS: [DrawFunction; 16] = comb!(bool, bool, bool, bool);
-        let has_color = framebuffer.color_buffer.is_some();
-        let has_depth = framebuffer.depth_buffer.is_some();
-        let has_normal = framebuffer.normal_buffer.is_some();
-        let has_texture = command.texture.is_some();
-        let idx = (has_color as usize) << 0
+        const DRAW_FUNCTIONS: [DrawFunction; 32] = comb!(bool, bool, bool, bool, bool);
+        let has_color: bool = framebuffer.color_buffer.is_some();
+        let has_depth: bool = framebuffer.depth_buffer.is_some();
+        let has_normal: bool = framebuffer.normal_buffer.is_some();
+        let has_texture: bool = command.texture.is_some();
+        let do_alpha_blending: bool = command.alpha_blending;
+
+        let idx: usize = (has_color as usize) << 0
             | (has_depth as usize) << 1
             | (has_normal as usize) << 2
-            | (has_texture as usize) << 3;
+            | (has_texture as usize) << 3
+            | (do_alpha_blending as usize) << 4;
         DRAW_FUNCTIONS[idx](self, framebuffer, local_viewport, vertices, command)
     }
 
@@ -523,6 +534,7 @@ impl Rasterizer {
         const HAS_DEPTH_BUFFER: bool,
         const HAS_NORMAL_BUFFER: bool,
         const HAS_TEXTURE: bool,
+        const ALPHA_BLENDING: bool,
     >(
         &self,
         framebuffer: &mut FramebufferTile,
@@ -690,6 +702,8 @@ impl Rasterizer {
                 Vec3::new(v0.color.y * v0.position.w, v1.color.y * v1.position.w, v2.color.y * v2.position.w);
             let b_over_w_v3 =
                 Vec3::new(v0.color.z * v0.position.w, v1.color.z * v1.position.w, v2.color.z * v2.position.w);
+            let a_over_w_v3 =
+                Vec3::new(v0.color.w * v0.position.w, v1.color.w * v1.position.w, v2.color.w * v2.position.w);
             let nx_over_w_v3 =
                 Vec3::new(v0.normal.x * v0.position.w, v1.normal.x * v1.position.w, v2.normal.x * v2.position.w);
             let ny_over_w_v3 =
@@ -717,6 +731,9 @@ impl Rasterizer {
             let b_over_w_min: f32 = dot(edge_min_v3, b_over_w_v3);
             let b_over_w_dx: f32 = dot(edge_dx_v3, b_over_w_v3);
             let b_over_w_dy: f32 = dot(edge_dy_v3, b_over_w_v3);
+            let a_over_w_min: f32 = dot(edge_min_v3, a_over_w_v3);
+            let a_over_w_dx: f32 = dot(edge_dx_v3, a_over_w_v3);
+            let a_over_w_dy: f32 = dot(edge_dy_v3, a_over_w_v3);
 
             // Precompute normal/w start values and interpolation increments
             let nx_over_w_min: f32 = dot(edge_min_v3, nx_over_w_v3);
@@ -788,6 +805,7 @@ impl Rasterizer {
             let mut r_over_w_row: f32 = r_over_w_min; // starting r/w
             let mut g_over_w_row: f32 = g_over_w_min; // starting g/w
             let mut b_over_w_row: f32 = b_over_w_min; // starting b/w
+            let mut a_over_w_row: f32 = a_over_w_min; // starting a/w
             let mut nx_over_w_row: f32 = nx_over_w_min; // starting nx/w
             let mut ny_over_w_row: f32 = ny_over_w_min; // starting ny/w
             let mut nz_over_w_row: f32 = nz_over_w_min; // starting nz/w
@@ -803,6 +821,7 @@ impl Rasterizer {
                 let mut r_over_w: f32 = r_over_w_row;
                 let mut g_over_w: f32 = g_over_w_row;
                 let mut b_over_w: f32 = b_over_w_row;
+                let mut a_over_w: f32 = a_over_w_row;
                 let mut nx_over_w: f32 = nx_over_w_row;
                 let mut ny_over_w: f32 = ny_over_w_row;
                 let mut nz_over_w: f32 = nz_over_w_row;
@@ -826,8 +845,10 @@ impl Rasterizer {
                 };
 
                 for _x in xmin..=xmax {
-                    if edge0_24_8 >= 0 && edge1_24_8 >= 0 && edge2_24_8 >= 0 {
-                        let mut discard: bool = false;
+                    'fragment: {
+                        if edge0_24_8 < 0 || edge1_24_8 < 0 || edge2_24_8 < 0 {
+                            break 'fragment; // discard - out of triangle bounds
+                        }
 
                         if HAS_DEPTH_BUFFER {
                             let z_u16: u16 = (z_24_8 >> 8) as u16;
@@ -835,51 +856,68 @@ impl Rasterizer {
                                 if z_u16 < *depth_ptr {
                                     *depth_ptr = z_u16;
                                 } else {
-                                    discard = true;
+                                    break 'fragment; // discard - failed the depth test
                                 }
                             }
                         }
 
-                        if !discard {
-                            let inv_inv_w: f32 = 1.0 / inv_w;
+                        let inv_inv_w: f32 = 1.0 / inv_w;
 
-                            if HAS_COLOR_BUFFER {
-                                let tex_fragment = if HAS_TEXTURE {
-                                    let u: f32 = u_over_w * inv_inv_w;
-                                    let v: f32 = v_over_w * inv_inv_w;
-                                    sampler.sample_prescaled(u, v)
-                                } else {
-                                    RGBA::new(255, 255, 255, 255)
-                                };
+                        if HAS_COLOR_BUFFER {
+                            // Fetch a corresponding texel color
+                            let tex_fragment = if HAS_TEXTURE {
+                                let u: f32 = u_over_w * inv_inv_w;
+                                let v: f32 = v_over_w * inv_inv_w;
+                                sampler.sample_prescaled(u, v)
+                            } else {
+                                RGBA::new(255, 255, 255, 255)
+                            };
 
-                                let r: f32 = r_over_w * inv_inv_w;
-                                let g: f32 = g_over_w * inv_inv_w;
-                                let b: f32 = b_over_w * inv_inv_w;
-                                let color = RGBA::new(
-                                    (r * tex_fragment.r as f32).clamp(0.0, 255.0) as u8, //
-                                    (g * tex_fragment.g as f32).clamp(0.0, 255.0) as u8, //
-                                    (b * tex_fragment.b as f32).clamp(0.0, 255.0) as u8, //
+                            // Recover interpolated per-fragment color
+                            let interpolated_r: f32 = r_over_w * inv_inv_w;
+                            let interpolated_g: f32 = g_over_w * inv_inv_w;
+                            let interpolated_b: f32 = b_over_w * inv_inv_w;
+                            let interpolated_a: f32 = a_over_w * inv_inv_w;
+
+                            // Multiply the interpolated and texel colors
+                            let r: u8 = (interpolated_r * tex_fragment.r as f32).clamp(0.0, 255.0) as u8;
+                            let g: u8 = (interpolated_g * tex_fragment.g as f32).clamp(0.0, 255.0) as u8;
+                            let b: u8 = (interpolated_b * tex_fragment.b as f32).clamp(0.0, 255.0) as u8;
+                            let a: u8 = (interpolated_a * tex_fragment.a as f32).clamp(0.0, 255.0) as u8;
+
+                            // Build the dest color
+                            let color: u32 = if ALPHA_BLENDING {
+                                let dest: RGBA = RGBA::from_u32(unsafe { *color_ptr });
+                                let inv_a: u32 = (255 - a) as u32;
+                                RGBA::new(
+                                    ((r as u32 * a as u32 + dest.r as u32 * inv_a) >> 8) as u8,
+                                    ((g as u32 * a as u32 + dest.g as u32 * inv_a) >> 8) as u8,
+                                    ((b as u32 * a as u32 + dest.b as u32 * inv_a) >> 8) as u8,
                                     255,
                                 )
-                                .to_u32();
-                                unsafe {
-                                    *color_ptr = color;
-                                }
-                            }
+                                .to_u32()
+                            } else {
+                                RGBA::new(r, g, b, 255).to_u32()
+                            };
 
-                            if HAS_NORMAL_BUFFER {
-                                unsafe {
-                                    *normal_ptr = Self::encode_normal_as_u32(
-                                        nx_over_w * inv_inv_w,
-                                        ny_over_w * inv_inv_w,
-                                        nz_over_w * inv_inv_w,
-                                    );
-                                }
+                            // Write the fragment color into the framebuffer
+                            unsafe {
+                                *color_ptr = color;
                             }
+                        }
 
-                            if cfg!(debug_assertions) {
-                                statistics.fragments_drawn += 1;
+                        if HAS_NORMAL_BUFFER {
+                            unsafe {
+                                *normal_ptr = Self::encode_normal_as_u32(
+                                    nx_over_w * inv_inv_w,
+                                    ny_over_w * inv_inv_w,
+                                    nz_over_w * inv_inv_w,
+                                );
                             }
+                        }
+
+                        if cfg!(debug_assertions) {
+                            statistics.fragments_drawn += 1;
                         }
                     }
                     edge0_24_8 += edge0_24x8_dx;
@@ -890,6 +928,7 @@ impl Rasterizer {
                     r_over_w += r_over_w_dx;
                     g_over_w += g_over_w_dx;
                     b_over_w += b_over_w_dx;
+                    a_over_w += a_over_w_dx;
                     nx_over_w += nx_over_w_dx;
                     ny_over_w += ny_over_w_dx;
                     nz_over_w += nz_over_w_dx;
@@ -919,6 +958,7 @@ impl Rasterizer {
                 r_over_w_row += r_over_w_dy;
                 g_over_w_row += g_over_w_dy;
                 b_over_w_row += b_over_w_dy;
+                a_over_w_row += a_over_w_dy;
                 nx_over_w_row += nx_over_w_dy;
                 ny_over_w_row += ny_over_w_dy;
                 nz_over_w_row += nz_over_w_dy;
@@ -1018,19 +1058,23 @@ impl Default for RasterizationCommand<'_> {
             color: Vec4::new(1.0, 1.0, 1.0, 1.0),
             texture: None,
             sampling_filter: SamplerFilter::Nearest,
+            alpha_blending: false,
         }
     }
 }
 
 impl Default for ScheduledCommand {
     fn default() -> Self {
-        ScheduledCommand { texture: None, sampling_filter: SamplerFilter::Nearest }
+        ScheduledCommand { texture: None, sampling_filter: SamplerFilter::Nearest, alpha_blending: false }
     }
 }
 
 impl PartialEq for ScheduledCommand {
     fn eq(&self, other: &Self) -> bool {
         if self.sampling_filter != other.sampling_filter {
+            return false;
+        }
+        if self.alpha_blending != other.alpha_blending {
             return false;
         }
         match (&self.texture, &other.texture) {
@@ -1840,6 +1884,167 @@ mod tests {
             tex_coords: &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0)],
             texture: Some(texture),
             sampling_filter: SamplerFilter::DebugMip,
+            ..Default::default()
+        };
+        assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
+    }
+
+    #[rstest]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/vert_simple_00.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        Vec4::new(1.0, 1.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/vert_simple_01.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        Vec4::new(1.0, 1.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/vert_simple_02.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        Vec4::new(1.0, 1.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/vert_simple_03.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        Vec4::new(1.0, 1.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/vert_simple_04.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        Vec4::new(1.0, 1.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/vert_simple_05.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        Vec4::new(1.0, 1.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/vert_simple_06.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        Vec4::new(1.0, 1.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/vert_simple_07.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        Vec4::new(1.0, 1.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/vert_simple_08.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        Vec4::new(1.0, 1.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/vert_simple_09.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/vert_simple_10.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 1.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/vert_simple_11.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.9),
+        Vec4::new(0.0, 1.0, 0.0, 0.9),
+        Vec4::new(0.0, 0.0, 1.0, 0.9),
+        "rasterizer/alpha_blend/vert_simple_12.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.8),
+        Vec4::new(0.0, 1.0, 0.0, 0.8),
+        Vec4::new(0.0, 0.0, 1.0, 0.8),
+        "rasterizer/alpha_blend/vert_simple_13.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.7),
+        Vec4::new(0.0, 1.0, 0.0, 0.7),
+        Vec4::new(0.0, 0.0, 1.0, 0.7),
+        "rasterizer/alpha_blend/vert_simple_14.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.6),
+        Vec4::new(0.0, 1.0, 0.0, 0.6),
+        Vec4::new(0.0, 0.0, 1.0, 0.6),
+        "rasterizer/alpha_blend/vert_simple_15.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.5),
+        Vec4::new(0.0, 1.0, 0.0, 0.5),
+        Vec4::new(0.0, 0.0, 1.0, 0.5),
+        "rasterizer/alpha_blend/vert_simple_16.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.4),
+        Vec4::new(0.0, 1.0, 0.0, 0.4),
+        Vec4::new(0.0, 0.0, 1.0, 0.4),
+        "rasterizer/alpha_blend/vert_simple_17.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.3),
+        Vec4::new(0.0, 1.0, 0.0, 0.3),
+        Vec4::new(0.0, 0.0, 1.0, 0.3),
+        "rasterizer/alpha_blend/vert_simple_18.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.2),
+        Vec4::new(0.0, 1.0, 0.0, 0.2),
+        Vec4::new(0.0, 0.0, 1.0, 0.2),
+        "rasterizer/alpha_blend/vert_simple_19.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.1),
+        Vec4::new(0.0, 1.0, 0.0, 0.1),
+        Vec4::new(0.0, 0.0, 1.0, 0.1),
+        "rasterizer/alpha_blend/vert_simple_20.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, 1.0, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/vert_simple_21.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/vert_simple_22.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        "rasterizer/alpha_blend/vert_simple_23.png"
+    )]
+    #[case(
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 0.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "rasterizer/alpha_blend/vert_simple_24.png"
+    )]
+    fn alpha_blend_simple(#[case] c0: Vec4, #[case] c1: Vec4, #[case] c2: Vec4, #[case] filename: &str) {
+        let command = RasterizationCommand {
+            world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
+            colors: &[c0, c1, c2],
+            alpha_blending: true,
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
