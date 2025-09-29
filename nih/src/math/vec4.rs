@@ -40,6 +40,12 @@ impl Vec4 {
     }
 }
 
+impl Default for Vec4 {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0, z: 0.0, w: 0.0 }
+    }
+}
+
 // a . b
 impl Dot for Vec4 {
     fn dot(self, rhs: Vec4) -> f32 {
@@ -63,11 +69,31 @@ impl std::ops::Add for Vec4 {
     }
 }
 
+// Vec4 += Vec4
+impl std::ops::AddAssign for Vec4 {
+    fn add_assign(&mut self, other: Vec4) {
+        self.x += other.x;
+        self.y += other.y;
+        self.z += other.z;
+        self.w += other.w;
+    }
+}
+
 // Vec4 - Vec4
 impl std::ops::Sub for Vec4 {
     type Output = Vec4;
     fn sub(self, other: Vec4) -> Vec4 {
         Vec4 { x: self.x - other.x, y: self.y - other.y, z: self.z - other.z, w: self.w - other.w }
+    }
+}
+
+// Vec4 -= Vec4
+impl std::ops::SubAssign for Vec4 {
+    fn sub_assign(&mut self, other: Vec4) {
+        self.x -= other.x;
+        self.y -= other.y;
+        self.z -= other.z;
+        self.w -= other.w;
     }
 }
 

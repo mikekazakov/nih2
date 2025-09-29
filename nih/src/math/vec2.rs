@@ -21,6 +21,12 @@ impl Vec2 {
     }
 }
 
+impl Default for Vec2 {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
+}
+
 impl Dot for Vec2 {
     fn dot(self, rhs: Vec2) -> f32 {
         self.x * rhs.x + self.y * rhs.y
@@ -75,11 +81,27 @@ impl std::ops::Add for Vec2 {
     }
 }
 
+// Vec2 += Vec2
+impl std::ops::AddAssign for Vec2 {
+    fn add_assign(&mut self, other: Vec2) {
+        self.x += other.x;
+        self.y += other.y;
+    }
+}
+
 // Vec2 - Vec2
 impl std::ops::Sub for Vec2 {
     type Output = Vec2;
     fn sub(self, other: Vec2) -> Vec2 {
         Vec2 { x: self.x - other.x, y: self.y - other.y }
+    }
+}
+
+// Vec2 -= Vec2
+impl std::ops::SubAssign for Vec2 {
+    fn sub_assign(&mut self, other: Vec2) {
+        self.x -= other.x;
+        self.y -= other.y;
     }
 }
 

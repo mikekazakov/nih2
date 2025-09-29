@@ -75,7 +75,7 @@ impl Texture {
 
         // Premultiply alpha
         if source.format == TextureFormat::RGBA {
-            for i in 0..source.texels.len() / 4 {
+            for i in 0..source.height as usize * source.width as usize {
                 let a = texel_data[i * 4 + 3] as u32;
                 texel_data[i * 4 + 0] = (texel_data[i * 4 + 0] as u32 * a / 255) as u8;
                 texel_data[i * 4 + 1] = (texel_data[i * 4 + 1] as u32 * a / 255) as u8;

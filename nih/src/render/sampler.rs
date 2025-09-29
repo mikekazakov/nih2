@@ -157,6 +157,24 @@ fn sample_bilinear<const SIZE: u16, const FORMAT: u8>(texels: *const u8, u: f32,
             ((a >> 16) & 0xFF) * wa + ((b >> 16) & 0xFF) * wb + ((c >> 16) & 0xFF) * wc + ((d >> 16) & 0xFF) * wd;
         return RGBA::new((r >> 16) as u8, (g >> 16) as u8, (b >> 16) as u8, 255);
     }
+    if FORMAT == TextureFormat::RGBA as u8 {
+        let a: u32 = unsafe { *(texels.add(offset_a) as *const u32) };
+        let b: u32 = unsafe { *(texels.add(offset_b) as *const u32) };
+        let c: u32 = unsafe { *(texels.add(offset_c) as *const u32) };
+        let d: u32 = unsafe { *(texels.add(offset_d) as *const u32) };
+        let r_16: u32 = (a & 0xFF) * wa + (b & 0xFF) * wb + (c & 0xFF) * wc + (d & 0xFF) * wd;
+        let g_16: u32 =
+            ((a >> 8) & 0xFF) * wa + ((b >> 8) & 0xFF) * wb + ((c >> 8) & 0xFF) * wc + ((d >> 8) & 0xFF) * wd;
+        let b_16: u32 =
+            ((a >> 16) & 0xFF) * wa + ((b >> 16) & 0xFF) * wb + ((c >> 16) & 0xFF) * wc + ((d >> 16) & 0xFF) * wd;
+        let a_16: u32 =
+            ((a >> 24) & 0xFF) * wa + ((b >> 24) & 0xFF) * wb + ((c >> 24) & 0xFF) * wc + ((d >> 24) & 0xFF) * wd;
+        let r_0: u32 = r_16 >> 16;
+        let g_0: u32 = g_16 >> 16;
+        let b_0: u32 = b_16 >> 16;
+        let a_0: u32 = a_16 >> 16;
+        return RGBA::new(r_0 as u8, g_0 as u8, b_0 as u8, a_0 as u8);
+    }
     RGBA::new(0, 0, 0, 255)
 }
 
@@ -394,33 +412,46 @@ static NEAREST_SAMPLER_TABLE: [[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS] = {
 
 static BILINEAR_SAMPLER_TABLE: [[SamplerEntry; MAX_LOG2_SIZE + 1]; FORMATS] = {
     let mut table = [[SamplerEntry { f: noop_sample, b: 0.0, s: 1.0 }; MAX_LOG2_SIZE + 1]; FORMATS];
-    const GRAYSCALE: u8 = TextureFormat::Grayscale as u8;
-    const RGB: u8 = TextureFormat::RGB as u8;
+    const TF_GRS: u8 = TextureFormat::Grayscale as u8;
+    const TF_RGB: u8 = TextureFormat::RGB as u8;
+    const TF_RGBA: u8 = TextureFormat::RGBA as u8;
     type SA = SamplerEntry;
     let grs = &mut table[TextureFormat::Grayscale as usize];
-    grs[0] = SA { f: sample_bilinear::<1, GRAYSCALE>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
-    grs[1] = SA { f: sample_bilinear::<2, GRAYSCALE>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
-    grs[2] = SA { f: sample_bilinear::<4, GRAYSCALE>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
-    grs[3] = SA { f: sample_bilinear::<8, GRAYSCALE>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
-    grs[4] = SA { f: sample_bilinear::<16, GRAYSCALE>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
-    grs[5] = SA { f: sample_bilinear::<32, GRAYSCALE>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
-    grs[6] = SA { f: sample_bilinear::<64, GRAYSCALE>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
-    grs[7] = SA { f: sample_bilinear::<128, GRAYSCALE>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
-    grs[8] = SA { f: sample_bilinear::<256, GRAYSCALE>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
-    grs[9] = SA { f: sample_bilinear::<512, GRAYSCALE>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
-    grs[10] = SA { f: sample_bilinear::<1024, GRAYSCALE>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+    grs[0] = SA { f: sample_bilinear::<1, TF_GRS>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
+    grs[1] = SA { f: sample_bilinear::<2, TF_GRS>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
+    grs[2] = SA { f: sample_bilinear::<4, TF_GRS>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
+    grs[3] = SA { f: sample_bilinear::<8, TF_GRS>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
+    grs[4] = SA { f: sample_bilinear::<16, TF_GRS>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
+    grs[5] = SA { f: sample_bilinear::<32, TF_GRS>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
+    grs[6] = SA { f: sample_bilinear::<64, TF_GRS>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
+    grs[7] = SA { f: sample_bilinear::<128, TF_GRS>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
+    grs[8] = SA { f: sample_bilinear::<256, TF_GRS>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
+    grs[9] = SA { f: sample_bilinear::<512, TF_GRS>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
+    grs[10] = SA { f: sample_bilinear::<1024, TF_GRS>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
     let rgb = &mut table[TextureFormat::RGB as usize];
-    rgb[0] = SA { f: sample_bilinear::<1, RGB>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
-    rgb[1] = SA { f: sample_bilinear::<2, RGB>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
-    rgb[2] = SA { f: sample_bilinear::<4, RGB>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
-    rgb[3] = SA { f: sample_bilinear::<8, RGB>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
-    rgb[4] = SA { f: sample_bilinear::<16, RGB>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
-    rgb[5] = SA { f: sample_bilinear::<32, RGB>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
-    rgb[6] = SA { f: sample_bilinear::<64, RGB>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
-    rgb[7] = SA { f: sample_bilinear::<128, RGB>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
-    rgb[8] = SA { f: sample_bilinear::<256, RGB>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
-    rgb[9] = SA { f: sample_bilinear::<512, RGB>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
-    rgb[10] = SA { f: sample_bilinear::<1024, RGB>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+    rgb[0] = SA { f: sample_bilinear::<1, TF_RGB>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
+    rgb[1] = SA { f: sample_bilinear::<2, TF_RGB>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
+    rgb[2] = SA { f: sample_bilinear::<4, TF_RGB>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
+    rgb[3] = SA { f: sample_bilinear::<8, TF_RGB>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
+    rgb[4] = SA { f: sample_bilinear::<16, TF_RGB>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
+    rgb[5] = SA { f: sample_bilinear::<32, TF_RGB>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
+    rgb[6] = SA { f: sample_bilinear::<64, TF_RGB>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
+    rgb[7] = SA { f: sample_bilinear::<128, TF_RGB>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
+    rgb[8] = SA { f: sample_bilinear::<256, TF_RGB>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
+    rgb[9] = SA { f: sample_bilinear::<512, TF_RGB>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
+    rgb[10] = SA { f: sample_bilinear::<1024, TF_RGB>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
+    let rgba = &mut table[TextureFormat::RGBA as usize];
+    rgba[0] = SA { f: sample_bilinear::<1, TF_RGBA>, b: 10.0 - 127.0 / (1.0 * 256.0), s: 1.0 * 256.0 };
+    rgba[1] = SA { f: sample_bilinear::<2, TF_RGBA>, b: 10.0 - 127.0 / (2.0 * 256.0), s: 2.0 * 256.0 };
+    rgba[2] = SA { f: sample_bilinear::<4, TF_RGBA>, b: 10.0 - 127.0 / (4.0 * 256.0), s: 4.0 * 256.0 };
+    rgba[3] = SA { f: sample_bilinear::<8, TF_RGBA>, b: 10.0 - 127.0 / (8.0 * 256.0), s: 8.0 * 256.0 };
+    rgba[4] = SA { f: sample_bilinear::<16, TF_RGBA>, b: 10.0 - 127.0 / (16.0 * 256.0), s: 16.0 * 256.0 };
+    rgba[5] = SA { f: sample_bilinear::<32, TF_RGBA>, b: 10.0 - 127.0 / (32.0 * 256.0), s: 32.0 * 256.0 };
+    rgba[6] = SA { f: sample_bilinear::<64, TF_RGBA>, b: 10.0 - 127.0 / (64.0 * 256.0), s: 64.0 * 256.0 };
+    rgba[7] = SA { f: sample_bilinear::<128, TF_RGBA>, b: 10.0 - 127.0 / (128.0 * 256.0), s: 128.0 * 256.0 };
+    rgba[8] = SA { f: sample_bilinear::<256, TF_RGBA>, b: 10.0 - 127.0 / (256.0 * 256.0), s: 256.0 * 256.0 };
+    rgba[9] = SA { f: sample_bilinear::<512, TF_RGBA>, b: 10.0 - 127.0 / (512.0 * 256.0), s: 512.0 * 256.0 };
+    rgba[10] = SA { f: sample_bilinear::<1024, TF_RGBA>, b: 10.0 - 127.0 / (1024.0 * 256.0), s: 1024.0 * 256.0 };
     table
 };
 

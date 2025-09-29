@@ -75,11 +75,29 @@ impl std::ops::Add for Vec3 {
     }
 }
 
+// Vec3 += Vec3
+impl std::ops::AddAssign for Vec3 {
+    fn add_assign(&mut self, other: Vec3) {
+        self.x += other.x;
+        self.y += other.y;
+        self.z += other.z;
+    }
+}
+
 // Vec3 - Vec3
 impl std::ops::Sub for Vec3 {
     type Output = Vec3;
     fn sub(self, other: Vec3) -> Vec3 {
         Vec3 { x: self.x - other.x, y: self.y - other.y, z: self.z - other.z }
+    }
+}
+
+// Vec3 -= Vec3
+impl std::ops::SubAssign for Vec3 {
+    fn sub_assign(&mut self, other: Vec3) {
+        self.x -= other.x;
+        self.y -= other.y;
+        self.z -= other.z;
     }
 }
 

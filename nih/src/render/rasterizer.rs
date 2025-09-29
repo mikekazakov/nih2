@@ -5,16 +5,30 @@ use std::cmp::{max, min};
 use std::ops::Add;
 use std::ptr;
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CullMode {
     /// No culling — all triangles are rendered.
-    None,
+    None = 0,
 
     /// Cull clockwise-wound triangles.
-    CW,
+    CW = 1,
 
     /// Cull counter-clockwise-wound triangles.
-    CCW,
+    CCW = 2,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlphaBlendingMode {
+    /// Dc = Sc * Sa
+    None = 0,
+
+    /// D = Sc * Sa + (1 - Sa) * Dc
+    Normal = 1,
+
+    /// D = Sc * Sa + Dc
+    Additive = 2,
 }
 
 #[derive(Debug, Clone)]
@@ -40,15 +54,15 @@ pub struct RasterizationCommand<'a> {
 
     // Sets whether the rasterizer should use alpha blending when writing fragments to the framebuffer.
     // If disabled, the fragment color will be written as is.
-    // Default: disabled.
-    pub alpha_blending: bool,
+    // Default: None.
+    pub alpha_blending: AlphaBlendingMode,
 }
 
 #[derive(Debug, Clone)]
 struct ScheduledCommand {
     texture: Option<std::sync::Arc<Texture>>,
     sampling_filter: SamplerFilter,
-    alpha_blending: bool,
+    alpha_blending: AlphaBlendingMode,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -528,32 +542,20 @@ impl Rasterizer {
         vertices: &[Vertex],
         command: &ScheduledCommand,
     ) -> PerTileStatistics {
-        type DrawFunction =
-            fn(&Rasterizer, &mut FramebufferTile, Viewport, &[Vertex], &ScheduledCommand) -> PerTileStatistics;
-        macro_rules! comb {
-            ( $( $($a:literal,)* $b:ty $(,$c:ty)* );+ ) => {
-                comb!(
-                    $( $($a,)* false $(,$c)* );+ ;
-                    $( $($a,)* true $(,$c)* );+
-                )
-            };
-            ( $( $($a:literal),+ );+ )                  => {
-                [$( Rasterizer::draw_triangles::<$($a),+>, )+]
-            };
-        }
-        const DRAW_FUNCTIONS: [DrawFunction; 32] = comb!(bool, bool, bool, bool, bool);
         let has_color: bool = framebuffer.color_buffer.is_some();
         let has_depth: bool = framebuffer.depth_buffer.is_some();
         let has_normal: bool = framebuffer.normal_buffer.is_some();
         let has_texture: bool = command.texture.is_some();
-        let do_alpha_blending: bool = command.alpha_blending;
+        let alpha_blending_mode: u8 = command.alpha_blending as u8;
 
-        let idx: usize = (has_color as usize) << 0
-            | (has_depth as usize) << 1
-            | (has_normal as usize) << 2
-            | (has_texture as usize) << 3
-            | (do_alpha_blending as usize) << 4;
-        DRAW_FUNCTIONS[idx](self, framebuffer, local_viewport, vertices, command)
+        let idx: usize = ((has_color as usize) << 3
+            | (has_depth as usize) << 2
+            | (has_normal as usize) << 1
+            | (has_texture as usize) << 0)
+            * 3
+            + alpha_blending_mode as usize;
+
+        DRAW_TRIANGLE_FUNCTIONS[idx](self, framebuffer, local_viewport, vertices, command)
     }
 
     fn draw_triangles<
@@ -561,7 +563,7 @@ impl Rasterizer {
         const HAS_DEPTH_BUFFER: bool,
         const HAS_NORMAL_BUFFER: bool,
         const HAS_TEXTURE: bool,
-        const ALPHA_BLENDING: bool,
+        const ALPHA_BLENDING: u8,
     >(
         &self,
         framebuffer: &mut FramebufferTile,
@@ -912,14 +914,25 @@ impl Rasterizer {
                             let b: u8 = (interpolated_b * tex_fragment.b as f32).clamp(0.0, 255.0) as u8;
                             let a: u8 = (interpolated_a * tex_fragment.a as f32).clamp(0.0, 255.0) as u8;
 
+                            // TODO: conditional alpha-test?
+
                             // Build the dest color
-                            let color: u32 = if ALPHA_BLENDING {
+                            let color: u32 = if ALPHA_BLENDING == AlphaBlendingMode::Normal as u8 {
                                 let dest: RGBA = RGBA::from_u32(unsafe { *color_ptr });
                                 let inv_a: u32 = (255 - a) as u32;
                                 RGBA::new(
                                     r + ((dest.r as u32 * inv_a) / 255) as u8,
                                     g + ((dest.g as u32 * inv_a) / 255) as u8,
                                     b + ((dest.b as u32 * inv_a) / 255) as u8,
+                                    255,
+                                )
+                                .to_u32()
+                            } else if ALPHA_BLENDING == AlphaBlendingMode::Additive as u8 {
+                                let dest: RGBA = RGBA::from_u32(unsafe { *color_ptr });
+                                RGBA::new(
+                                    (r as u32 + dest.r as u32).min(255) as u8,
+                                    (g as u32 + dest.g as u32).min(255) as u8,
+                                    (b as u32 + dest.b as u32).min(255) as u8,
                                     255,
                                 )
                                 .to_u32()
@@ -1020,6 +1033,67 @@ impl Rasterizer {
     }
 }
 
+type DrawTrianglesFn =
+    fn(&Rasterizer, &mut FramebufferTile, Viewport, &[Vertex], &ScheduledCommand) -> PerTileStatistics;
+
+fn panicking_draw_triangles(
+    _: &Rasterizer,
+    _: &mut FramebufferTile,
+    _: Viewport,
+    _: &[Vertex],
+    _: &ScheduledCommand,
+) -> PerTileStatistics {
+    panic!("Dummy, should never be called");
+}
+
+const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 48;
+const DRAW_TRIANGLE_FUNCTIONS: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] = {
+    let mut functions: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] =
+        [panicking_draw_triangles; DRAW_TRIANGLE_FUNCTIONS_NUM];
+    macro_rules! draw_triangles_instantiate_function {
+            ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr) => {
+                $t[$i] = Rasterizer::draw_triangles::<$a, $b, $c, $d, $e>;
+                $i += 1;
+            };
+        }
+    macro_rules! draw_triangles_per_alpha_blending {
+        ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr) => {
+            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, 0u8);
+            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, 1u8);
+            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, 2u8);
+        };
+    }
+    macro_rules! draw_triangles_per_has_texture {
+        ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr) => {
+            draw_triangles_per_alpha_blending!($t, $i, $a, $b, $c, false);
+            draw_triangles_per_alpha_blending!($t, $i, $a, $b, $c, true);
+        };
+    }
+    macro_rules! draw_triangles_per_has_normal {
+        ($t:expr, $i:expr, $a:expr, $b:expr) => {
+            draw_triangles_per_has_texture!($t, $i, $a, $b, false);
+            draw_triangles_per_has_texture!($t, $i, $a, $b, true);
+        };
+    }
+    macro_rules! draw_triangles_per_has_depth {
+        ($t:expr, $i:expr, $a:expr) => {
+            draw_triangles_per_has_normal!($t, $i, $a, false);
+            draw_triangles_per_has_normal!($t, $i, $a, true);
+        };
+    }
+    macro_rules! draw_triangles_per_has_color {
+        ($t:expr, $i:expr) => {
+            draw_triangles_per_has_depth!($t, $i, false);
+            draw_triangles_per_has_depth!($t, $i, true);
+        };
+    }
+
+    let mut index: usize = 0;
+    draw_triangles_per_has_color!(functions, index);
+    let _ = index;
+    functions
+};
+
 fn debug_color(idx: u32) -> Vec4 {
     fn hash(mut x: u32) -> u32 {
         x = (x ^ 61) ^ (x >> 16);
@@ -1085,14 +1159,18 @@ impl Default for RasterizationCommand<'_> {
             color: Vec4::new(1.0, 1.0, 1.0, 1.0),
             texture: None,
             sampling_filter: SamplerFilter::Nearest,
-            alpha_blending: false,
+            alpha_blending: AlphaBlendingMode::None,
         }
     }
 }
 
 impl Default for ScheduledCommand {
     fn default() -> Self {
-        ScheduledCommand { texture: None, sampling_filter: SamplerFilter::Nearest, alpha_blending: false }
+        ScheduledCommand {
+            texture: None,
+            sampling_filter: SamplerFilter::Nearest,
+            alpha_blending: AlphaBlendingMode::None,
+        }
     }
 }
 
@@ -2081,7 +2159,7 @@ mod tests {
         let command = RasterizationCommand {
             world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
             colors: &[c0, c1, c2],
-            alpha_blending: true,
+            alpha_blending: AlphaBlendingMode::Normal,
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
@@ -2242,7 +2320,7 @@ mod tests {
         let command = RasterizationCommand {
             world_positions: &[Vec3::new(0.0, 0.5, 0.0), Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, -0.5, 0.0)],
             colors: &[c0, c1, c2],
-            alpha_blending: true,
+            alpha_blending: AlphaBlendingMode::Normal,
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo_wbg(&command), filename);
@@ -2411,7 +2489,7 @@ mod tests {
             tex_coords: &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0)],
             texture: Some(texture),
             colors: &[c0, c1, c2],
-            alpha_blending: true,
+            alpha_blending: AlphaBlendingMode::Normal,
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo(&command), filename);
@@ -2580,7 +2658,7 @@ mod tests {
             tex_coords: &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0)],
             texture: Some(texture),
             colors: &[c0, c1, c2],
-            alpha_blending: true,
+            alpha_blending: AlphaBlendingMode::Normal,
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo_wbg(&command), filename);
@@ -2749,7 +2827,7 @@ mod tests {
             tex_coords: &[Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 0.0)],
             texture: Some(texture),
             colors: &[c0, c1, c2],
-            alpha_blending: true,
+            alpha_blending: AlphaBlendingMode::Normal,
             ..Default::default()
         };
         assert_albedo_against_reference(&render_to_64x64_albedo_wbg(&command), filename);
