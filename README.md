@@ -17,5 +17,5 @@ It's not production-quality and has no practical purpose - it's just the result 
 
 - `./examples/texture_filtering`  
   Drawing quads using different texture filtering in ~100 LoCs.
-- [./examples/particles](examples/particles/README.md)  
+- [./examples/particles](https://github.com/mikekazakov/nih2/tree/main/examples/particles)  
   Rendering 1K particles in a single `main()` function in ~150 LoCs.
