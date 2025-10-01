@@ -88,6 +88,14 @@ struct Tile {
     binning_bounds: TileBinningBounds,
 }
 
+struct TiledJob {
+    framebuffer_tile: FramebufferTile,
+    render_tile: *const Tile,
+    statistics: PerTileStatistics,
+}
+unsafe impl Send for TiledJob {}
+unsafe impl Sync for TiledJob {}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RasterizerStatistics {
     // The number of triangles that were requested to be rasterized.
@@ -443,55 +451,48 @@ impl Rasterizer {
             return;
         }
 
-        struct Job {
-            framebuffer_tile: FramebufferTile,
-            render_tile: *const Tile,
-            statistics: PerTileStatistics,
-        }
-        unsafe impl Send for Job {}
-        unsafe impl Sync for Job {}
-
-        let mut jobs = Vec::<Job>::new();
-        for y in 0..self.tiles_y {
-            for x in 0..self.tiles_x {
-                let idx = (y * self.tiles_x + x) as usize;
-                let render_tile: *const Tile = &mut self.tiles[idx];
-                let framebuffer_tile = framebuffer.tile(x, y);
-                jobs.push(Job { framebuffer_tile, render_tile: render_tile, statistics: PerTileStatistics::default() });
-            }
-        }
-        use rayon::prelude::*;
-        jobs.par_iter_mut().for_each(|job| {
-            let render_tile = unsafe { &*job.render_tile };
-            if render_tile.triangles.is_empty() {
-                return;
-            }
-
-            let viewport = render_tile.local_viewport;
-            let vertices = &self.vertices;
-
-            let mut tile_verts = ArrayVec::<Vertex, 384>::new(); // up to 128 triangles
-            let mut cmd_idx = render_tile.triangles.first().unwrap().cmd;
-
-            for tri in &render_tile.triangles {
-                if tile_verts.is_full() || tri.cmd != cmd_idx {
-                    let call_stats = self.draw_triangles_dispatch(
-                        &mut job.framebuffer_tile,
-                        viewport,
-                        &tile_verts,
-                        &self.commands[cmd_idx as usize],
-                    );
-                    job.statistics = job.statistics + call_stats;
-                    tile_verts.clear();
-                    cmd_idx = tri.cmd;
+        if self.tiles_x > 1 || self.tiles_y > 1 {
+            // Draw tiles in parallel using rayon
+            let mut jobs = Vec::<TiledJob>::new();
+            for y in 0..self.tiles_y {
+                for x in 0..self.tiles_x {
+                    let idx = (y * self.tiles_x + x) as usize;
+                    let render_tile: *const Tile = &mut self.tiles[idx];
+                    let framebuffer_tile = framebuffer.tile(x, y);
+                    jobs.push(TiledJob { framebuffer_tile, render_tile, statistics: PerTileStatistics::default() });
                 }
-
-                tile_verts.push(vertices[tri.tri_start as usize + 0]);
-                tile_verts.push(vertices[tri.tri_start as usize + 1]);
-                tile_verts.push(vertices[tri.tri_start as usize + 2]);
             }
+            use rayon::prelude::*;
+            jobs.par_iter_mut().for_each(|job| {
+                self.draw_tile(job);
+            });
+            for job in jobs {
+                self.stats.fragments_drawn += job.statistics.fragments_drawn;
+            }
+        } else {
+            // Draw the single tile directly, don't bother with multithreading
+            let render_tile: *const Tile = &mut self.tiles[0];
+            let framebuffer_tile = framebuffer.tile(0, 0);
+            let mut job = TiledJob { framebuffer_tile, render_tile, statistics: PerTileStatistics::default() };
+            self.draw_tile(&mut job);
+            self.stats.fragments_drawn += job.statistics.fragments_drawn;
+        }
+    }
 
-            if !tile_verts.is_empty() {
+    fn draw_tile(&self, job: &mut TiledJob) {
+        let render_tile = unsafe { &*job.render_tile };
+        if render_tile.triangles.is_empty() {
+            return;
+        }
+
+        let viewport = render_tile.local_viewport;
+        let vertices = &self.vertices;
+
+        let mut tile_verts = ArrayVec::<Vertex, 384>::new(); // up to 128 triangles
+        let mut cmd_idx = render_tile.triangles.first().unwrap().cmd;
+
+        for tri in &render_tile.triangles {
+            if tile_verts.is_full() || tri.cmd != cmd_idx {
                 let call_stats = self.draw_triangles_dispatch(
                     &mut job.framebuffer_tile,
                     viewport,
@@ -499,11 +500,23 @@ impl Rasterizer {
                     &self.commands[cmd_idx as usize],
                 );
                 job.statistics = job.statistics + call_stats;
+                tile_verts.clear();
+                cmd_idx = tri.cmd;
             }
-        });
 
-        for job in jobs {
-            self.stats.fragments_drawn += job.statistics.fragments_drawn;
+            tile_verts.push(vertices[tri.tri_start as usize + 0]);
+            tile_verts.push(vertices[tri.tri_start as usize + 1]);
+            tile_verts.push(vertices[tri.tri_start as usize + 2]);
+        }
+
+        if !tile_verts.is_empty() {
+            let call_stats = self.draw_triangles_dispatch(
+                &mut job.framebuffer_tile,
+                viewport,
+                &tile_verts,
+                &self.commands[cmd_idx as usize],
+            );
+            job.statistics = job.statistics + call_stats;
         }
     }
 
