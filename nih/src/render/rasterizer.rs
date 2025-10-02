@@ -21,7 +21,7 @@ pub enum CullMode {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlphaBlendingMode {
-    /// Dc = Sc * Sa
+    /// Dc = Sc
     None = 0,
 
     /// D = Sc * Sa + (1 - Sa) * Dc
@@ -158,6 +158,8 @@ impl Rasterizer {
         };
     }
 
+    // Sets up tiling, scaling.
+    // Reset draw commands and statistics.
     pub fn setup(&mut self, viewport: Viewport) {
         assert!(viewport.xmax > viewport.xmin);
         assert!(viewport.ymax > viewport.ymin);
@@ -215,12 +217,22 @@ impl Rasterizer {
         let viewport_scale = self.viewport_scale;
         let scheduled_vertices_start = self.vertices.len();
 
-        let command_color_alpha_premul: Vec4 = Vec4::new(
-            command.color.x * command.color.w,
-            command.color.y * command.color.w,
-            command.color.z * command.color.w,
-            command.color.w,
-        );
+        // Command color - uniformly applied to all committed triangles, conditionally premultiplied by alpha if alpha_blending is enabled.
+        let command_color: Vec4 = if command.alpha_blending == AlphaBlendingMode::None {
+            command.color
+        } else {
+            Vec4::new(
+                command.color.x * command.color.w,
+                command.color.y * command.color.w,
+                command.color.z * command.color.w,
+                command.color.w,
+            )
+        };
+        // If the command color is (1, 1, 1, 1) - it can be safely ignored.
+        let is_command_color_defined: bool = (command_color.x - 1.0).abs() > 0.005
+            || (command_color.y - 1.0).abs() > 0.005
+            || (command_color.z - 1.0).abs() > 0.005
+            || (command_color.w - 1.0).abs() > 0.005;
 
         for i in 0..input_triangles_num {
             let index = |n: usize| {
@@ -230,9 +242,9 @@ impl Rasterizer {
                     i * 3 + n
                 }
             };
-            let i0 = index(0);
-            let i1 = index(1);
-            let i2 = index(2);
+            let i0: usize = index(0);
+            let i1: usize = index(1);
+            let i2: usize = index(2);
 
             let mut input_vertices = [Vertex::default(); 3];
             input_vertices[0].world_position = command.model * command.world_positions[i0];
@@ -254,29 +266,29 @@ impl Rasterizer {
                 input_vertices[2].normal = (normal_matrix * command.normals[i2]).normalized();
             }
             if command.colors.is_empty() {
-                input_vertices[0].color = command_color_alpha_premul;
-                input_vertices[1].color = command_color_alpha_premul;
-                input_vertices[2].color = command_color_alpha_premul;
+                input_vertices[0].color = command_color;
+                input_vertices[1].color = command_color;
+                input_vertices[2].color = command_color;
             } else {
-                // TODO: branch out if command_color_alpha_premul==(1,1,1,1)
-                input_vertices[0].color = Vec4::new(
-                    command.colors[i0].x * command.colors[i0].w * command_color_alpha_premul.x,
-                    command.colors[i0].y * command.colors[i0].w * command_color_alpha_premul.y,
-                    command.colors[i0].z * command.colors[i0].w * command_color_alpha_premul.z,
-                    command.colors[i0].w * command_color_alpha_premul.w,
-                );
-                input_vertices[1].color = Vec4::new(
-                    command.colors[i1].x * command.colors[i1].w * command_color_alpha_premul.x,
-                    command.colors[i1].y * command.colors[i1].w * command_color_alpha_premul.y,
-                    command.colors[i1].z * command.colors[i1].w * command_color_alpha_premul.z,
-                    command.colors[i1].w * command_color_alpha_premul.w,
-                );
-                input_vertices[2].color = Vec4::new(
-                    command.colors[i2].x * command.colors[i2].w * command_color_alpha_premul.x,
-                    command.colors[i2].y * command.colors[i2].w * command_color_alpha_premul.y,
-                    command.colors[i2].z * command.colors[i2].w * command_color_alpha_premul.z,
-                    command.colors[i2].w * command_color_alpha_premul.w,
-                );
+                input_vertices[0].color = command.colors[i0];
+                input_vertices[1].color = command.colors[i1];
+                input_vertices[2].color = command.colors[i2];
+                if is_command_color_defined {
+                    input_vertices[0].color *= command_color;
+                    input_vertices[1].color *= command_color;
+                    input_vertices[2].color *= command_color;
+                }
+                if command.alpha_blending != AlphaBlendingMode::None {
+                    input_vertices[0].color.x *= input_vertices[0].color.w;
+                    input_vertices[0].color.y *= input_vertices[0].color.w;
+                    input_vertices[0].color.z *= input_vertices[0].color.w;
+                    input_vertices[1].color.x *= input_vertices[1].color.w;
+                    input_vertices[1].color.y *= input_vertices[1].color.w;
+                    input_vertices[1].color.z *= input_vertices[1].color.w;
+                    input_vertices[2].color.x *= input_vertices[2].color.w;
+                    input_vertices[2].color.y *= input_vertices[2].color.w;
+                    input_vertices[2].color.z *= input_vertices[2].color.w;
+                }
             }
             if command.tex_coords.is_empty() {
                 input_vertices[0].tex_coord = Vec2::new(0.0, 0.0);
@@ -2971,6 +2983,89 @@ mod tests_watertight {
                     );
                 }
                 assert!(tight);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_alpha_blending {
+    use super::*;
+    use crate::assert_rgba_eq;
+
+    #[test]
+    fn blending_none() {
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(1u16, 1u16);
+        let mut rasterizer = Rasterizer::new();
+
+        let pos = [Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0)];
+        for background in (0..=255).step_by(51) {
+            for foreground in (0..=255).step_by(51) {
+                for alpha in (0..=255).step_by(51) {
+                    rasterizer.setup(Viewport::new(0, 0, 1u16, 1u16));
+                    rasterizer.commit(&RasterizationCommand {
+                        world_positions: &pos,
+                        color: Vec4::new(foreground as f32 / 255.0, 0.0, 0.0, alpha as f32 / 255.0),
+                        alpha_blending: AlphaBlendingMode::None,
+                        ..Default::default()
+                    });
+                    color_buffer.fill(RGBA::new(background as u8, 0, 0, 255).to_u32());
+                    rasterizer.draw(&mut Framebuffer { color_buffer: Some(&mut color_buffer), ..Default::default() });
+                    let expected: u8 = foreground as u8;
+                    assert_rgba_eq!(RGBA::from_u32(color_buffer.at(0, 0)), RGBA::new(expected, 0, 0, 255), 2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blending_normal() {
+        let mut rasterizer = Rasterizer::new();
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(1u16, 1u16);
+        let pos = [Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0)];
+        for background in (0..=255).step_by(51) {
+            for foreground in (0..=255).step_by(51) {
+                for alpha in (0..=255).step_by(51) {
+                    rasterizer.setup(Viewport::new(0, 0, 1u16, 1u16));
+                    rasterizer.commit(&RasterizationCommand {
+                        world_positions: &pos,
+                        color: Vec4::new(foreground as f32 / 255.0, 0.0, 0.0, alpha as f32 / 255.0),
+                        alpha_blending: AlphaBlendingMode::Normal,
+                        ..Default::default()
+                    });
+                    color_buffer.fill(RGBA::new(background as u8, 0, 0, 255).to_u32());
+                    rasterizer.draw(&mut Framebuffer { color_buffer: Some(&mut color_buffer), ..Default::default() });
+                    let expected: u8 = (((foreground as f32 / 255.0) * (alpha as f32 / 255.0)
+                        + (background as f32 / 255.0) * ((255 - alpha) as f32 / 255.0))
+                        * 255.0) as u8;
+                    assert_rgba_eq!(RGBA::from_u32(color_buffer.at(0, 0)), RGBA::new(expected, 0, 0, 255), 20);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blending_additive() {
+        let mut rasterizer = Rasterizer::new();
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(1u16, 1u16);
+        let pos = [Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0)];
+        for background in (0..=255).step_by(51) {
+            for foreground in (0..=255).step_by(51) {
+                for alpha in (0..=255).step_by(51) {
+                    rasterizer.setup(Viewport::new(0, 0, 1u16, 1u16));
+                    rasterizer.commit(&RasterizationCommand {
+                        world_positions: &pos,
+                        color: Vec4::new(foreground as f32 / 255.0, 0.0, 0.0, alpha as f32 / 255.0),
+                        alpha_blending: AlphaBlendingMode::Additive,
+                        ..Default::default()
+                    });
+                    color_buffer.fill(RGBA::new(background as u8, 0, 0, 255).to_u32());
+                    rasterizer.draw(&mut Framebuffer { color_buffer: Some(&mut color_buffer), ..Default::default() });
+                    let expected: u8 =
+                        (((foreground as f32 / 255.0) * (alpha as f32 / 255.0) + (background as f32 / 255.0)) * 255.0)
+                            .min(255.0) as u8;
+                    assert_rgba_eq!(RGBA::from_u32(color_buffer.at(0, 0)), RGBA::new(expected, 0, 0, 255), 20);
+                }
             }
         }
     }

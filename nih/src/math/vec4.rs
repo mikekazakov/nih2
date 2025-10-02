@@ -105,6 +105,16 @@ impl std::ops::Mul<Vec4> for Vec4 {
     }
 }
 
+// Vec4 *= Vec4
+impl std::ops::MulAssign<Vec4> for Vec4 {
+    fn mul_assign(&mut self, other: Vec4) {
+        self.x *= other.x;
+        self.y *= other.y;
+        self.z *= other.z;
+        self.w *= other.w;
+    }
+}
+
 // Vec4 * f32
 impl std::ops::Mul<f32> for Vec4 {
     type Output = Vec4;
