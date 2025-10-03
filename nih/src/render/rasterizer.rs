@@ -470,11 +470,19 @@ impl Rasterizer {
             for y in 0..self.tiles_y {
                 for x in 0..self.tiles_x {
                     let idx = (y * self.tiles_x + x) as usize;
-                    let render_tile: *const Tile = &mut self.tiles[idx];
-                    let framebuffer_tile = framebuffer.tile(x, y);
-                    jobs.push(TiledJob { framebuffer_tile, render_tile, statistics: PerTileStatistics::default() });
+                    if !self.tiles[idx].triangles.is_empty() {
+                        let render_tile: *const Tile = &mut self.tiles[idx];
+                        let framebuffer_tile = framebuffer.tile(x, y);
+                        jobs.push(TiledJob { framebuffer_tile, render_tile, statistics: PerTileStatistics::default() });
+                    }
                 }
             }
+            // Order the tiles with the most triangles first
+            jobs.sort_by(|job1, job2| {
+                let tile1_triangles_len = unsafe { job1.render_tile.as_ref().unwrap_unchecked() }.triangles.len();
+                let tile2_triangles_len = unsafe { job2.render_tile.as_ref().unwrap_unchecked() }.triangles.len();
+                tile2_triangles_len.cmp(&tile1_triangles_len) // NB! This is the reverse order, because we want the most triangles first
+            });
             use rayon::prelude::*;
             jobs.par_iter_mut().for_each(|job| {
                 self.draw_tile(job);
