@@ -1,5 +1,6 @@
 use super::super::math::*;
 use super::*;
+use crate::math::simd::U32x4;
 use arrayvec::ArrayVec;
 use std::cmp::{max, min};
 use std::ops::Add;
@@ -745,6 +746,27 @@ impl Rasterizer {
             let z_24x8_dx = (z_f32_dx * 256.0) as i32;
             let z_24x8_dy = (z_f32_dy * 256.0) as i32;
 
+            let edge_depth_simd_min: U32x4 = U32x4::load([
+                z_24_8_min,
+                edge0_min_24_8.cast_unsigned(),
+                edge1_min_24_8.cast_unsigned(),
+                edge2_min_24_8.cast_unsigned(),
+            ]);
+            let edge_depth_simd_dx: U32x4 = U32x4::load([
+                z_24x8_dx.cast_unsigned(),
+                edge0_24x8_dx.cast_unsigned(),
+                edge1_24x8_dx.cast_unsigned(),
+                edge2_24x8_dx.cast_unsigned(),
+            ]);
+            let edge_depth_simd_dy: U32x4 = U32x4::load([
+                z_24x8_dy.cast_unsigned(),
+                edge0_24x8_dy.cast_unsigned(),
+                edge1_24x8_dy.cast_unsigned(),
+                edge2_24x8_dy.cast_unsigned(),
+            ]);
+            let edge_simd_non_negative_mask: U32x4 =
+                U32x4::load([0x80000000u32, 0x80000000u32, 0x80000000u32, 0x80000000u32]);
+
             // Express per-vertex edgefunctions, 1/w, colors/w and N/w as Vectors-3 to simplify the setup math
             let edge_min_v3 = Vec3::new(edge0_min, edge1_min, edge2_min);
             let edge_dx_v3 = Vec3::new(edge0_dx, edge1_dx, edge2_dx);
@@ -852,10 +874,11 @@ impl Rasterizer {
             };
 
             // Set up the initial values at each consequent row
-            let mut edge0_row_24_8: i32 = edge0_min_24_8; // starting v12 edgefunction value
-            let mut edge1_row_24_8: i32 = edge1_min_24_8; // starting v20 edgefunction value
-            let mut edge2_row_24_8: i32 = edge2_min_24_8; // starting v01 edgefunction value
-            let mut z_24_8_row: u32 = z_24_8_min; // starting depth
+            // let mut edge0_row_24_8: i32 = edge0_min_24_8; // starting v12 edgefunction value
+            // let mut edge1_row_24_8: i32 = edge1_min_24_8; // starting v20 edgefunction value
+            // let mut edge2_row_24_8: i32 = edge2_min_24_8; // starting v01 edgefunction value
+            let mut edge_depth_simd_row: U32x4 = edge_depth_simd_min;
+            // let mut z_24_8_row: u32 = z_24_8_min; // starting depth
             let mut r_over_w_row: f32 = r_over_w_min; // starting r/w
             let mut g_over_w_row: f32 = g_over_w_min; // starting g/w
             let mut b_over_w_row: f32 = b_over_w_min; // starting b/w
@@ -868,9 +891,10 @@ impl Rasterizer {
             let mut inv_w_row: f32 = inv_w_min; // starting 1/w
 
             for _y in ymin..=ymax {
-                let mut edge0_24_8: i32 = edge0_row_24_8;
-                let mut edge1_24_8: i32 = edge1_row_24_8;
-                let mut edge2_24_8: i32 = edge2_row_24_8;
+                // let mut edge0_24_8: i32 = edge0_row_24_8;
+                // let mut edge1_24_8: i32 = edge1_row_24_8;
+                // let mut edge2_24_8: i32 = edge2_row_24_8;
+                let mut edge_depth_simd: U32x4 = edge_depth_simd_row;
                 let mut inv_w: f32 = inv_w_row;
                 let mut r_over_w: f32 = r_over_w_row;
                 let mut g_over_w: f32 = g_over_w_row;
@@ -881,7 +905,7 @@ impl Rasterizer {
                 let mut nz_over_w: f32 = nz_over_w_row;
                 let mut u_over_w: f32 = u_over_w_row;
                 let mut v_over_w: f32 = v_over_w_row;
-                let mut z_24_8: u32 = z_24_8_row;
+                // let mut z_24_8: u32 = z_24_8_row;
                 let mut color_ptr: *mut u32 = if HAS_COLOR_BUFFER {
                     color_row_ptr
                 } else {
@@ -900,12 +924,17 @@ impl Rasterizer {
 
                 for _x in xmin..=xmax {
                     'fragment: {
-                        if edge0_24_8 < 0 || edge1_24_8 < 0 || edge2_24_8 < 0 {
+                        if edge_depth_simd.bitand(edge_simd_non_negative_mask).any_nonzero() {
                             break 'fragment; // discard - out of triangle bounds
                         }
 
+                        // if edge0_24_8 < 0 || edge1_24_8 < 0 || edge2_24_8 < 0 {
+                        //     break 'fragment; // discard - out of triangle bounds
+                        // }
+
                         if HAS_DEPTH_BUFFER {
-                            let z_u16: u16 = (z_24_8 >> 8) as u16;
+                            let z_u16: u16 = (edge_depth_simd.extract_lane0() >> 8) as u16;
+                            // let z_u16: u16 = (z_24_8 >> 8) as u16;
                             unsafe {
                                 if z_u16 < *depth_ptr {
                                     *depth_ptr = z_u16;
@@ -985,10 +1014,11 @@ impl Rasterizer {
                             statistics.fragments_drawn += 1;
                         }
                     }
-                    edge0_24_8 += edge0_24x8_dx;
-                    edge1_24_8 += edge1_24x8_dx;
-                    edge2_24_8 += edge2_24x8_dx;
-                    z_24_8 = z_24_8.overflowing_add_signed(z_24x8_dx).0;
+                    // edge0_24_8 += edge0_24x8_dx;
+                    // edge1_24_8 += edge1_24x8_dx;
+                    // edge2_24_8 += edge2_24x8_dx;
+                    edge_depth_simd = edge_depth_simd.add(edge_depth_simd_dx);
+                    // z_24_8 = z_24_8.overflowing_add_signed(z_24x8_dx).0;
                     inv_w += inv_w_dx;
                     r_over_w += r_over_w_dx;
                     g_over_w += g_over_w_dx;
@@ -1015,10 +1045,11 @@ impl Rasterizer {
                         }
                     }
                 }
-                edge0_row_24_8 += edge0_24x8_dy;
-                edge1_row_24_8 += edge1_24x8_dy;
-                edge2_row_24_8 += edge2_24x8_dy;
-                z_24_8_row = z_24_8_row.overflowing_add_signed(z_24x8_dy).0;
+                // edge0_row_24_8 += edge0_24x8_dy;
+                // edge1_row_24_8 += edge1_24x8_dy;
+                // edge2_row_24_8 += edge2_24x8_dy;
+                edge_depth_simd_row = edge_depth_simd_row.add(edge_depth_simd_dy);
+                // z_24_8_row = z_24_8_row.overflowing_add_signed(z_24x8_dy).0;
                 inv_w_row += inv_w_dy;
                 r_over_w_row += r_over_w_dy;
                 g_over_w_row += g_over_w_dy;
