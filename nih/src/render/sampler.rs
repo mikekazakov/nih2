@@ -558,7 +558,6 @@ mod tests {
     use crate::render::{TextureFormat, TextureSource};
     use std::sync::Arc;
 
-    #[macro_export]
     macro_rules! assert_rgba_eq {
         ($left:expr, $right:expr, $tol:expr $(,)?) => {{
             let l = $left;
