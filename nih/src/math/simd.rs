@@ -108,13 +108,12 @@ impl U32x4 {
             #[cfg(target_arch = "x86_64")]
             {
                 use core::arch::x86_64::*;
-                _mm_cvtsi128_si32(v) as u32
+                _mm_cvtsi128_si32(self.inner) as u32
             }
 
             #[cfg(target_arch = "aarch64")]
             {
                 use core::arch::aarch64::*;
-                // vgetq_lane_u32::<0>(self.inner) // lane index 0
                 vgetq_lane_u32(self.inner, 0)
             }
         }
