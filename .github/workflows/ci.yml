@@ -10,13 +10,11 @@ env:
 jobs:
   build_and_test:
     name: NIH2 unit tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        toolchain:
-          - stable
-          - beta
-          - nightly
+        toolchain: [ stable, beta, nightly ]
+        runner: [ ubuntu-latest, ubuntu-24.04-arm ]
     steps:
       - uses: actions/checkout@v4
       - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
