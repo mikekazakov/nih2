@@ -4,6 +4,7 @@ members = [
     "demo",
     "nih",
     "examples/particles",
+    "examples/normal_mapping",
     "examples/texture_filtering",
 ]
 

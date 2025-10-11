@@ -35,7 +35,14 @@ pub enum AlphaBlendingMode {
 #[derive(Debug, Clone)]
 pub struct RasterizationCommand<'a> {
     pub world_positions: &'a [Vec3],
-    pub normals: &'a [Vec3],    // if no normals are provided, they will be derived automatically
+
+    /// Per-vertex normals in objects space.
+    /// If no normals are provided, they will be derived automatically from face orientations.
+    pub normals: &'a [Vec3],
+
+    // Later:
+    // pub tangents: &'a [Vec3],
+    //
     pub tex_coords: &'a [Vec2], // empty if absent
     pub colors: &'a [Vec4],     // empty if absent, .color will be used
 
@@ -48,6 +55,8 @@ pub struct RasterizationCommand<'a> {
     pub culling: CullMode,
     pub color: Vec4,
     pub texture: Option<std::sync::Arc<Texture>>,
+
+    pub normal_map: Option<std::sync::Arc<Texture>>,
 
     // Set the filter to be used when sampling the texture.
     // Default: nearest.
@@ -62,6 +71,7 @@ pub struct RasterizationCommand<'a> {
 #[derive(Debug, Clone)]
 struct ScheduledCommand {
     texture: Option<std::sync::Arc<Texture>>,
+    normal_map: Option<std::sync::Arc<Texture>>,
     sampling_filter: SamplerFilter,
     alpha_blending: AlphaBlendingMode,
 }
@@ -117,6 +127,22 @@ pub struct RasterizerStatistics {
 #[derive(Debug, Clone, Copy)]
 struct PerTileStatistics {
     pub fragments_drawn: usize,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NormalsProcessingMode {
+    // Normals are not interpolated nor written into a normals buffer.
+    // Normals buffer is not available.
+    None = 0,
+
+    // Per-vertex normals are interpolated and written into a normals buffer.
+    // Normals buffer is available.
+    Vertex = 1,
+
+    // Per-vertex normals and tangents are interpolated, a normal map is sampled, multiplied by TBN and written into the normals buffer.
+    // Normals buffer is available.
+    NormalMapping = 2,
 }
 
 pub struct Rasterizer {
@@ -247,14 +273,32 @@ impl Rasterizer {
             let i1: usize = index(1);
             let i2: usize = index(2);
 
-            let mut input_vertices = [Vertex::default(); 3];
+            let mut input_vertices: [Vertex; 3] = [Vertex::default(); 3];
+
+            // Fill world positions of the triangle vertices.
             input_vertices[0].world_position = command.model * command.world_positions[i0];
             input_vertices[1].world_position = command.model * command.world_positions[i1];
             input_vertices[2].world_position = command.model * command.world_positions[i2];
+
+            // Fill projected positions in NDC space [-1, 1].
             input_vertices[0].position = view_projection * input_vertices[0].world_position.as_point4();
             input_vertices[1].position = view_projection * input_vertices[1].world_position.as_point4();
             input_vertices[2].position = view_projection * input_vertices[2].world_position.as_point4();
+
+            // Fill per-vertex texture coordinates.
+            if command.tex_coords.is_empty() {
+                input_vertices[0].tex_coord = Vec2::new(0.0, 0.0);
+                input_vertices[1].tex_coord = Vec2::new(0.0, 0.0);
+                input_vertices[2].tex_coord = Vec2::new(0.0, 0.0);
+            } else {
+                input_vertices[0].tex_coord = command.tex_coords[i0];
+                input_vertices[1].tex_coord = command.tex_coords[i1];
+                input_vertices[2].tex_coord = command.tex_coords[i2];
+            }
+
+            // Fill normals, either with rotated input normals or derived from the triangle face.
             if command.normals.is_empty() {
+                // Derive a uniform non-smooth normal vector from the triangle's vertices.
                 let edge1 = input_vertices[1].world_position - input_vertices[0].world_position;
                 let edge2 = input_vertices[2].world_position - input_vertices[0].world_position;
                 let face_normal = cross(edge1, edge2).normalized();
@@ -266,6 +310,30 @@ impl Rasterizer {
                 input_vertices[1].normal = (normal_matrix * command.normals[i1]).normalized();
                 input_vertices[2].normal = (normal_matrix * command.normals[i2]).normalized();
             }
+
+            // TODO: support pre-defined smooth per-vertex tangents
+            {
+                // Derive a uniform non-smooth tangent vector from the triangle's vertices.
+                let uv1: Vec2 = input_vertices[1].tex_coord - input_vertices[0].tex_coord;
+                let uv2: Vec2 = input_vertices[2].tex_coord - input_vertices[0].tex_coord;
+                let e1: Vec3 = input_vertices[1].world_position - input_vertices[0].world_position;
+                let e2: Vec3 = input_vertices[2].world_position - input_vertices[0].world_position;
+                let denom: f32 = uv1.x * uv2.y - uv1.y * uv2.x;
+                let tangent: Vec3 = if denom.abs() > 0.000001 {
+                    let r: f32 = 1.0 / denom;
+                    (e1 * uv2.y - e2 * uv1.y) * r
+                } else {
+                    Vec3::new(1.0, 0.0, 0.0)
+                };
+                let n0 = input_vertices[0].normal;
+                let n1 = input_vertices[1].normal;
+                let n2 = input_vertices[2].normal;
+                input_vertices[0].tangent = (tangent - n0 * n0.dot(tangent)).normalized();
+                input_vertices[1].tangent = (tangent - n1 * n1.dot(tangent)).normalized();
+                input_vertices[2].tangent = (tangent - n2 * n2.dot(tangent)).normalized();
+            }
+
+            // Fill per-vertex colors.
             if command.colors.is_empty() {
                 input_vertices[0].color = command_color;
                 input_vertices[1].color = command_color;
@@ -290,15 +358,6 @@ impl Rasterizer {
                     input_vertices[2].color.y *= input_vertices[2].color.w;
                     input_vertices[2].color.z *= input_vertices[2].color.w;
                 }
-            }
-            if command.tex_coords.is_empty() {
-                input_vertices[0].tex_coord = Vec2::new(0.0, 0.0);
-                input_vertices[1].tex_coord = Vec2::new(0.0, 0.0);
-                input_vertices[2].tex_coord = Vec2::new(0.0, 0.0);
-            } else {
-                input_vertices[0].tex_coord = command.tex_coords[i0];
-                input_vertices[1].tex_coord = command.tex_coords[i1];
-                input_vertices[2].tex_coord = command.tex_coords[i2];
             }
 
             // TODO: cull earlier????
@@ -364,6 +423,7 @@ impl Rasterizer {
         // Reuse the last command or create a new one
         let required_scheduled_command = ScheduledCommand {
             texture: command_texture,
+            normal_map: command.normal_map.clone(),
             sampling_filter: command.sampling_filter,
             alpha_blending: command.alpha_blending,
         };
@@ -578,24 +638,37 @@ impl Rasterizer {
     ) -> PerTileStatistics {
         let has_color: bool = framebuffer.color_buffer.is_some();
         let has_depth: bool = framebuffer.depth_buffer.is_some();
-        let has_normal: bool = framebuffer.normal_buffer.is_some();
+        let has_normal_buffer: bool = framebuffer.normal_buffer.is_some();
         let has_texture: bool = command.texture.is_some();
+        let has_normal_map: bool = command.normal_map.is_some();
         let alpha_blending_mode: u8 = command.alpha_blending as u8;
+        let normal_processing_mode: u8 = if has_normal_buffer {
+            if has_normal_map && has_texture {
+                NormalsProcessingMode::NormalMapping as u8
+            } else {
+                NormalsProcessingMode::Vertex as u8
+            }
+        } else {
+            NormalsProcessingMode::None as u8
+        };
 
-        let idx: usize = ((has_color as usize) << 3
-            | (has_depth as usize) << 2
-            | (has_normal as usize) << 1
-            | (has_texture as usize) << 0)
-            * 3
-            + alpha_blending_mode as usize;
-
+        let mut idx = 0;
+        idx += has_color as usize;
+        idx *= 2; // two options for depth
+        idx += has_depth as usize;
+        idx *= 3; // three options for normals processing
+        idx += normal_processing_mode as usize;
+        idx *= 2; // two options for texture
+        idx += has_texture as usize;
+        idx *= 3; // three options for alpha blending
+        idx += alpha_blending_mode as usize;
         DRAW_TRIANGLE_FUNCTIONS[idx](self, framebuffer, local_viewport, vertices, command)
     }
 
     fn draw_triangles<
         const HAS_COLOR_BUFFER: bool,
         const HAS_DEPTH_BUFFER: bool,
-        const HAS_NORMAL_BUFFER: bool,
+        const NORMALS_PROCESSING: u8,
         const HAS_TEXTURE: bool,
         const ALPHA_BLENDING: u8,
     >(
@@ -611,7 +684,10 @@ impl Rasterizer {
         assert!(local_viewport.ymax >= framebuffer.origin_y());
         debug_assert_eq!(HAS_COLOR_BUFFER, framebuffer.color_buffer.is_some());
         debug_assert_eq!(HAS_DEPTH_BUFFER, framebuffer.depth_buffer.is_some());
-        debug_assert_eq!(HAS_NORMAL_BUFFER, framebuffer.normal_buffer.is_some());
+        debug_assert_eq!(
+            NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8,
+            framebuffer.normal_buffer.is_some()
+        );
         let mut statistics = PerTileStatistics::default();
         let triangles_num = vertices.len() / 3;
         if triangles_num == 0 {
@@ -665,8 +741,8 @@ impl Rasterizer {
                 continue; // TODO: treat degenerate triangles separately
             }
 
-            // Set up the sampler
-            let sampler: Sampler = if HAS_TEXTURE {
+            // Set up the albedo texture sampler
+            let albedo_sampler: Sampler = if HAS_TEXTURE {
                 let texture = command.texture.as_ref().unwrap();
                 let t01: Vec2 = v1.tex_coord - v0.tex_coord;
                 let t02: Vec2 = v2.tex_coord - v0.tex_coord;
@@ -679,7 +755,24 @@ impl Rasterizer {
             } else {
                 Sampler::default()
             };
-            let sampler_uv_scale: SamplerUVScale = sampler.uv_scale();
+            let albedo_sampler_uv_scale: SamplerUVScale = albedo_sampler.uv_scale();
+
+            // Set up the normal map sampler
+            let normal_map_sampler: Sampler = if NORMALS_PROCESSING == NormalsProcessingMode::NormalMapping as u8 {
+                // TODO: check that the size of normal map [0] is the same as texture [0]?
+                // TODO: don't repeat the calculation and share the LOD somehow?
+                let texture = command.normal_map.as_ref().unwrap();
+                let t01: Vec2 = v1.tex_coord - v0.tex_coord;
+                let t02: Vec2 = v2.tex_coord - v0.tex_coord;
+                let texel_area_x_2: f32 = (t01.x * t02.y - t02.x * t01.y).abs()
+                    * texture.mips[0].width as f32
+                    * texture.mips[0].height as f32;
+                let rho2: f32 = texel_area_x_2 / area_x_2;
+                let lod: f32 = 0.5 * rho2.log2();
+                Sampler::new(texture, command.sampling_filter, lod)
+            } else {
+                Sampler::default()
+            };
 
             // Set up the edge function biases to follow the top-left fill rule
             let is_v01_top_left: bool = Self::is_top_left_24_8(v01_x_24_8, v01_y_24_8);
@@ -799,15 +892,21 @@ impl Rasterizer {
                 Vec3::new(v0.normal.y * v0.position.w, v1.normal.y * v1.position.w, v2.normal.y * v2.position.w);
             let nz_over_w_v3 =
                 Vec3::new(v0.normal.z * v0.position.w, v1.normal.z * v1.position.w, v2.normal.z * v2.position.w);
+            let tx_over_w_v3 =
+                Vec3::new(v0.tangent.x * v0.position.w, v1.tangent.x * v1.position.w, v2.tangent.x * v2.position.w);
+            let ty_over_w_v3 =
+                Vec3::new(v0.tangent.y * v0.position.w, v1.tangent.y * v1.position.w, v2.tangent.y * v2.position.w);
+            let tz_over_w_v3 =
+                Vec3::new(v0.tangent.z * v0.position.w, v1.tangent.z * v1.position.w, v2.tangent.z * v2.position.w);
             let u_over_w_v3 = Vec3::new(
-                (v0.tex_coord.x + sampler_uv_scale.bias) * sampler_uv_scale.scale * v0.position.w,
-                (v1.tex_coord.x + sampler_uv_scale.bias) * sampler_uv_scale.scale * v1.position.w,
-                (v2.tex_coord.x + sampler_uv_scale.bias) * sampler_uv_scale.scale * v2.position.w,
+                (v0.tex_coord.x + albedo_sampler_uv_scale.bias) * albedo_sampler_uv_scale.scale * v0.position.w,
+                (v1.tex_coord.x + albedo_sampler_uv_scale.bias) * albedo_sampler_uv_scale.scale * v1.position.w,
+                (v2.tex_coord.x + albedo_sampler_uv_scale.bias) * albedo_sampler_uv_scale.scale * v2.position.w,
             );
             let v_over_w_v3 = Vec3::new(
-                (v0.tex_coord.y + sampler_uv_scale.bias) * sampler_uv_scale.scale * v0.position.w,
-                (v1.tex_coord.y + sampler_uv_scale.bias) * sampler_uv_scale.scale * v1.position.w,
-                (v2.tex_coord.y + sampler_uv_scale.bias) * sampler_uv_scale.scale * v2.position.w,
+                (v0.tex_coord.y + albedo_sampler_uv_scale.bias) * albedo_sampler_uv_scale.scale * v0.position.w,
+                (v1.tex_coord.y + albedo_sampler_uv_scale.bias) * albedo_sampler_uv_scale.scale * v1.position.w,
+                (v2.tex_coord.y + albedo_sampler_uv_scale.bias) * albedo_sampler_uv_scale.scale * v2.position.w,
             );
 
             // Precompute color/w start values and interpolation increments
@@ -834,6 +933,17 @@ impl Rasterizer {
             let nz_over_w_min: f32 = dot(edge_min_v3, nz_over_w_v3);
             let nz_over_w_dx: f32 = dot(edge_dx_v3, nz_over_w_v3);
             let nz_over_w_dy: f32 = dot(edge_dy_v3, nz_over_w_v3);
+
+            // Precompute tangent/w start values and interpolation increments
+            let tx_over_w_min: f32 = dot(edge_min_v3, tx_over_w_v3);
+            let tx_over_w_dx: f32 = dot(edge_dx_v3, tx_over_w_v3);
+            let tx_over_w_dy: f32 = dot(edge_dy_v3, tx_over_w_v3);
+            let ty_over_w_min: f32 = dot(edge_min_v3, ty_over_w_v3);
+            let ty_over_w_dx: f32 = dot(edge_dx_v3, ty_over_w_v3);
+            let ty_over_w_dy: f32 = dot(edge_dy_v3, ty_over_w_v3);
+            let tz_over_w_min: f32 = dot(edge_min_v3, tz_over_w_v3);
+            let tz_over_w_dx: f32 = dot(edge_dx_v3, tz_over_w_v3);
+            let tz_over_w_dy: f32 = dot(edge_dy_v3, tz_over_w_v3);
 
             // Precompute texture coordinates start values and interpolation increments
             let u_over_w_min: f32 = dot(edge_min_v3, u_over_w_v3);
@@ -873,7 +983,7 @@ impl Rasterizer {
             } else {
                 ptr::null_mut()
             };
-            let mut normal_row_ptr: *mut u32 = if HAS_NORMAL_BUFFER {
+            let mut normal_row_ptr: *mut u32 = if NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8 {
                 unsafe {
                     framebuffer
                         .normal_buffer
@@ -895,6 +1005,9 @@ impl Rasterizer {
             let mut nx_over_w_row: f32 = nx_over_w_min; // starting nx/w
             let mut ny_over_w_row: f32 = ny_over_w_min; // starting ny/w
             let mut nz_over_w_row: f32 = nz_over_w_min; // starting nz/w
+            let mut tx_over_w_row: f32 = tx_over_w_min; // starting tx/w
+            let mut ty_over_w_row: f32 = ty_over_w_min; // starting ty/w
+            let mut tz_over_w_row: f32 = tz_over_w_min; // starting tz/w
             let mut u_over_w_row: f32 = u_over_w_min; // starting u/w
             let mut v_over_w_row: f32 = v_over_w_min; // starting v/w
             let mut inv_w_row: f32 = inv_w_min; // starting 1/w
@@ -909,6 +1022,9 @@ impl Rasterizer {
                 let mut nx_over_w: f32 = nx_over_w_row;
                 let mut ny_over_w: f32 = ny_over_w_row;
                 let mut nz_over_w: f32 = nz_over_w_row;
+                let mut tx_over_w: f32 = tx_over_w_row;
+                let mut ty_over_w: f32 = ty_over_w_row;
+                let mut tz_over_w: f32 = tz_over_w_row;
                 let mut u_over_w: f32 = u_over_w_row;
                 let mut v_over_w: f32 = v_over_w_row;
                 let mut color_ptr: *mut u32 = if HAS_COLOR_BUFFER {
@@ -921,7 +1037,7 @@ impl Rasterizer {
                 } else {
                     ptr::null_mut()
                 };
-                let mut normal_ptr: *mut u32 = if HAS_NORMAL_BUFFER {
+                let mut normal_ptr: *mut u32 = if NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8 {
                     normal_row_ptr
                 } else {
                     ptr::null_mut()
@@ -950,7 +1066,7 @@ impl Rasterizer {
                             let tex_fragment = if HAS_TEXTURE {
                                 let u: f32 = u_over_w * inv_inv_w;
                                 let v: f32 = v_over_w * inv_inv_w;
-                                sampler.sample_prescaled(u, v)
+                                albedo_sampler.sample_prescaled(u, v)
                             } else {
                                 RGBA::new(255, 255, 255, 255)
                             };
@@ -999,13 +1115,43 @@ impl Rasterizer {
                             }
                         }
 
-                        if HAS_NORMAL_BUFFER {
+                        if NORMALS_PROCESSING == NormalsProcessingMode::Vertex as u8 {
                             unsafe {
                                 *normal_ptr = Self::encode_normal_as_u32(
                                     nx_over_w * inv_inv_w,
                                     ny_over_w * inv_inv_w,
                                     nz_over_w * inv_inv_w,
                                 );
+                            }
+                        }
+                        if NORMALS_PROCESSING == NormalsProcessingMode::NormalMapping as u8 {
+                            let normal: Vec3 =
+                                Vec3::new(nx_over_w * inv_inv_w, ny_over_w * inv_inv_w, nz_over_w * inv_inv_w);
+                            let tangent: Vec3 =
+                                Vec3::new(tx_over_w * inv_inv_w, ty_over_w * inv_inv_w, tz_over_w * inv_inv_w);
+                            let bitangent: Vec3 = cross(normal, tangent);
+                            let tbn: Mat33 = Mat33([
+                                tangent.x,
+                                bitangent.x,
+                                normal.x,
+                                tangent.y,
+                                bitangent.y,
+                                normal.y,
+                                tangent.z,
+                                bitangent.z,
+                                normal.z,
+                            ]);
+                            let sampled_normal_rgba: RGBA =
+                                normal_map_sampler.sample_prescaled(u_over_w * inv_inv_w, v_over_w * inv_inv_w);
+                            let sampled_normal: Vec3 = Vec3::new(
+                                (sampled_normal_rgba.r as f32 - 127.0) / 128.0,
+                                (sampled_normal_rgba.g as f32 - 127.0) / 128.0,
+                                (sampled_normal_rgba.b as f32 - 127.0) / 128.0,
+                            );
+                            let final_normal = (tbn * sampled_normal).normalized();
+                            unsafe {
+                                *normal_ptr =
+                                    Self::encode_normal_as_u32(final_normal.x, final_normal.y, final_normal.z);
                             }
                         }
 
@@ -1022,6 +1168,9 @@ impl Rasterizer {
                     nx_over_w += nx_over_w_dx;
                     ny_over_w += ny_over_w_dx;
                     nz_over_w += nz_over_w_dx;
+                    tx_over_w += tx_over_w_dx;
+                    ty_over_w += ty_over_w_dx;
+                    tz_over_w += tz_over_w_dx;
                     u_over_w += u_over_w_dx;
                     v_over_w += v_over_w_dx;
                     if HAS_COLOR_BUFFER {
@@ -1034,7 +1183,7 @@ impl Rasterizer {
                             depth_ptr = depth_ptr.add(1);
                         }
                     }
-                    if HAS_NORMAL_BUFFER {
+                    if NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8 {
                         unsafe {
                             normal_ptr = normal_ptr.add(1);
                         }
@@ -1049,6 +1198,9 @@ impl Rasterizer {
                 nx_over_w_row += nx_over_w_dy;
                 ny_over_w_row += ny_over_w_dy;
                 nz_over_w_row += nz_over_w_dy;
+                tx_over_w_row += tx_over_w_dy;
+                ty_over_w_row += ty_over_w_dy;
+                tz_over_w_row += tz_over_w_dy;
                 u_over_w_row += u_over_w_dy;
                 v_over_w_row += v_over_w_dy;
                 if HAS_COLOR_BUFFER {
@@ -1061,7 +1213,7 @@ impl Rasterizer {
                         depth_row_ptr = depth_row_ptr.add(Framebuffer::TILE_WITH as usize);
                     }
                 }
-                if HAS_NORMAL_BUFFER {
+                if NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8 {
                     unsafe {
                         normal_row_ptr = normal_row_ptr.add(Framebuffer::TILE_WITH as usize);
                     }
@@ -1093,7 +1245,7 @@ fn panicking_draw_triangles(
     panic!("Dummy, should never be called");
 }
 
-const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 48;
+const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 72;
 const DRAW_TRIANGLE_FUNCTIONS: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] = {
     let mut functions: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] =
         [panicking_draw_triangles; DRAW_TRIANGLE_FUNCTIONS_NUM];
@@ -1116,16 +1268,17 @@ const DRAW_TRIANGLE_FUNCTIONS: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] = 
             draw_triangles_per_alpha_blending!($t, $i, $a, $b, $c, true);
         };
     }
-    macro_rules! draw_triangles_per_has_normal {
+    macro_rules! draw_triangles_per_normal_processing {
         ($t:expr, $i:expr, $a:expr, $b:expr) => {
-            draw_triangles_per_has_texture!($t, $i, $a, $b, false);
-            draw_triangles_per_has_texture!($t, $i, $a, $b, true);
+            draw_triangles_per_has_texture!($t, $i, $a, $b, 0u8);
+            draw_triangles_per_has_texture!($t, $i, $a, $b, 1u8);
+            draw_triangles_per_has_texture!($t, $i, $a, $b, 2u8);
         };
     }
     macro_rules! draw_triangles_per_has_depth {
         ($t:expr, $i:expr, $a:expr) => {
-            draw_triangles_per_has_normal!($t, $i, $a, false);
-            draw_triangles_per_has_normal!($t, $i, $a, true);
+            draw_triangles_per_normal_processing!($t, $i, $a, false);
+            draw_triangles_per_normal_processing!($t, $i, $a, true);
         };
     }
     macro_rules! draw_triangles_per_has_color {
@@ -1205,6 +1358,7 @@ impl Default for RasterizationCommand<'_> {
             culling: CullMode::None,
             color: Vec4::new(1.0, 1.0, 1.0, 1.0),
             texture: None,
+            normal_map: None,
             sampling_filter: SamplerFilter::Nearest,
             alpha_blending: AlphaBlendingMode::None,
         }
@@ -1215,6 +1369,7 @@ impl Default for ScheduledCommand {
     fn default() -> Self {
         ScheduledCommand {
             texture: None,
+            normal_map: None,
             sampling_filter: SamplerFilter::Nearest,
             alpha_blending: AlphaBlendingMode::None,
         }
@@ -1229,11 +1384,28 @@ impl PartialEq for ScheduledCommand {
         if self.alpha_blending != other.alpha_blending {
             return false;
         }
-        match (&self.texture, &other.texture) {
-            (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
-            (None, None) => true,
-            _ => false,
+
+        if self.texture.is_some() != other.texture.is_some() {
+            return false;
         }
+        if self.texture.is_some()
+            && other.texture.is_some()
+            && !std::sync::Arc::ptr_eq(self.texture.as_ref().unwrap(), &other.texture.as_ref().unwrap())
+        {
+            return false;
+        }
+
+        if self.normal_map.is_some() != other.normal_map.is_some() {
+            return false;
+        }
+        if self.normal_map.is_some()
+            && other.normal_map.is_some()
+            && !std::sync::Arc::ptr_eq(self.normal_map.as_ref().unwrap(), &other.normal_map.as_ref().unwrap())
+        {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -1319,6 +1491,227 @@ mod tests_binning {
                 | ((!rasterizer.tiles[2].triangles.is_empty()) as u32) << 2
                 | ((!rasterizer.tiles[3].triangles.is_empty()) as u32) << 3;
             assert_eq!(mask, tc.mask);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_normal_mapping {
+    use super::*;
+
+    macro_rules! assert_rgba_eq {
+        ($left:expr, $right:expr, $tol:expr $(,)?) => {{
+            let l = $left;
+            let r = $right;
+            let tol: i16 = $tol as i16;
+
+            let dr = (l.r as i16 - r.r as i16).abs();
+            let dg = (l.g as i16 - r.g as i16).abs();
+            let db = (l.b as i16 - r.b as i16).abs();
+            let da = (l.a as i16 - r.a as i16).abs();
+
+            if dr > tol || dg > tol || db > tol || da > tol {
+                panic!("assertion failed: left != right within tol={}\n  left: {:?}\n right: {:?}", tol, l, r);
+            }
+        }};
+    }
+
+    #[test]
+    fn tangents_from_derived_normals() {
+        struct TC {
+            wp0: Vec3,
+            wp1: Vec3,
+            wp2: Vec3,
+            tc0: Vec2,
+            tc1: Vec2,
+            tc2: Vec2,
+            exp_t0: Vec3,
+            exp_t1: Vec3,
+            exp_t2: Vec3,
+        }
+        let test_cases = vec![
+            TC {
+                wp0: Vec3::new(-1.0, 1.0, 0.0),
+                wp1: Vec3::new(-1.0, -1.0, 0.0),
+                wp2: Vec3::new(1.0, -1.0, 0.0),
+                tc0: Vec2::new(0.0, 0.0),
+                tc1: Vec2::new(0.0, 1.0),
+                tc2: Vec2::new(1.0, 1.0),
+                exp_t0: Vec3::new(1.0, 0.0, 0.0),
+                exp_t1: Vec3::new(1.0, 0.0, 0.0),
+                exp_t2: Vec3::new(1.0, 0.0, 0.0),
+            },
+            TC {
+                wp0: Vec3::new(0.0, 1.0, 0.0),
+                wp1: Vec3::new(-1.0, -1.0, 0.0),
+                wp2: Vec3::new(1.0, -1.0, 0.0),
+                tc0: Vec2::new(0.5, 0.0),
+                tc1: Vec2::new(0.0, 1.0),
+                tc2: Vec2::new(1.0, 1.0),
+                exp_t0: Vec3::new(1.0, 0.0, 0.0),
+                exp_t1: Vec3::new(1.0, 0.0, 0.0),
+                exp_t2: Vec3::new(1.0, 0.0, 0.0),
+            },
+            TC {
+                wp0: Vec3::new(0.0, 1.0, 0.0),
+                wp1: Vec3::new(-1.0, -1.0, 0.0),
+                wp2: Vec3::new(1.0, 1.0, 0.0),
+                tc0: Vec2::new(0.5, 0.0),
+                tc1: Vec2::new(0.0, 1.0),
+                tc2: Vec2::new(1.0, 1.0),
+                exp_t0: Vec3::new(0.707106769, 0.707106769, 0.0),
+                exp_t1: Vec3::new(0.707106769, 0.707106769, 0.0),
+                exp_t2: Vec3::new(0.707106769, 0.707106769, 0.0),
+            },
+            TC {
+                wp0: Vec3::new(1.0, 1.0, 0.0),
+                wp1: Vec3::new(-1.0, 1.0, 0.0),
+                wp2: Vec3::new(-1.0, -1.0, 0.0),
+                tc0: Vec2::new(0.0, 0.0),
+                tc1: Vec2::new(0.0, 1.0),
+                tc2: Vec2::new(1.0, 1.0),
+                exp_t0: Vec3::new(0.0, -1.0, 0.0),
+                exp_t1: Vec3::new(0.0, -1.0, 0.0),
+                exp_t2: Vec3::new(0.0, -1.0, 0.0),
+            },
+        ];
+
+        for tc in test_cases {
+            let mut rasterizer = Rasterizer::new();
+            rasterizer.setup(Viewport::new(0, 0, 64, 64));
+
+            rasterizer.commit(&RasterizationCommand {
+                world_positions: &[tc.wp0, tc.wp1, tc.wp2],
+                tex_coords: &[tc.tc0, tc.tc1, tc.tc2],
+                ..Default::default()
+            });
+            assert!((rasterizer.vertices[0].tangent - tc.exp_t0).length() < 0.0001);
+            assert!((rasterizer.vertices[1].tangent - tc.exp_t1).length() < 0.0001);
+            assert!((rasterizer.vertices[2].tangent - tc.exp_t2).length() < 0.0001);
+        }
+    }
+
+    #[test]
+    fn sampled_normal_by_tbn_with_default_vertex_normals() {
+        struct TC {
+            normal_map: [u8; 3],
+            expected_normal: RGBA,
+        }
+        let test_cases = vec![
+            TC { normal_map: [127u8, 127u8, 255u8], expected_normal: RGBA::new(127, 127, 255, 0) },
+            TC { normal_map: [217u8, 127u8, 217u8], expected_normal: RGBA::new(217, 127, 217, 0) },
+            TC { normal_map: [37u8, 127u8, 217u8], expected_normal: RGBA::new(37, 127, 217, 0) },
+            TC { normal_map: [127u8, 217u8, 217u8], expected_normal: RGBA::new(127, 217, 217, 0) },
+            TC { normal_map: [127u8, 37u8, 217u8], expected_normal: RGBA::new(127, 37, 217, 0) },
+            TC { normal_map: [201u8, 201u8, 201u8], expected_normal: RGBA::new(201, 201, 201, 0) },
+            TC { normal_map: [53u8, 53u8, 201u8], expected_normal: RGBA::new(53, 53, 201, 0) },
+        ];
+        for tc in test_cases {
+            let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(1, 1);
+            color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+            let mut normal_buffer = TiledBuffer::<u32, 64, 64>::new(1, 1);
+            normal_buffer.fill(0);
+            let mut rasterizer = Rasterizer::new();
+            rasterizer.setup(Viewport::new(0, 0, 1, 1));
+            let albedo_texture = Texture::new(&TextureSource {
+                texels: &vec![255u8, 0u8, 0u8],
+                width: 1,
+                height: 1,
+                format: TextureFormat::RGB,
+            });
+            let normal_map = Texture::new(&TextureSource {
+                texels: &tc.normal_map,
+                width: 1,
+                height: 1,
+                format: TextureFormat::RGB,
+            });
+            rasterizer.commit(&RasterizationCommand {
+                world_positions: &[Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0)],
+                tex_coords: &[Vec2::new(0.5, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0)],
+                texture: Some(albedo_texture),
+                normal_map: Some(normal_map),
+                ..Default::default()
+            });
+            rasterizer.draw(&mut Framebuffer {
+                color_buffer: Some(&mut color_buffer),
+                normal_buffer: Some(&mut normal_buffer),
+                ..Default::default()
+            });
+            assert_rgba_eq!(RGBA::from_u32(normal_buffer.at(0, 0)), tc.expected_normal, 5);
+        }
+    }
+
+    #[test]
+    fn sampled_normal_by_tbn_with_explicit_vertex_normal() {
+        struct TC {
+            vertex_normal: Vec3,
+            normal_map: [u8; 3],
+            expected_normal: RGBA,
+        }
+
+        // // 37 127 217
+        // let v = Vec3::new(0.5, 0.0, 0.5).normalized();
+        // println!("{} {} {}", v.x, v.y, v.z);
+        // let aaa: RGBA = RGBA::from_u32(Rasterizer::encode_normal_as_u32(v.x, v.y, v.z));
+        // println!("{} {} {}", aaa.r, aaa.g, aaa.b);
+
+        let test_cases = vec![
+            TC {
+                vertex_normal: Vec3::new(0.0, 0.0, 1.0),
+                normal_map: [127u8, 127u8, 255u8],
+                expected_normal: RGBA::new(127, 127, 255, 0),
+            },
+            TC {
+                vertex_normal: Vec3::new(0.707, 0.0, 0.707),
+                normal_map: [127u8, 127u8, 255u8],
+                expected_normal: RGBA::new(217, 127, 217, 0),
+            },
+            TC {
+                vertex_normal: Vec3::new(0.707, 0.0, 0.707),
+                normal_map: [217u8, 127u8, 217u8],
+                expected_normal: RGBA::new(255, 127, 127, 0),
+            },
+            // TC { normal_map: [127u8, 127u8, 255u8], expected_normal: RGBA::new(127, 127, 255, 0) },
+            // TC { normal_map: [217u8, 127u8, 217u8], expected_normal: RGBA::new(217, 127, 217, 0) },
+            // TC { normal_map: [37u8, 127u8, 217u8], expected_normal: RGBA::new(37, 127, 217, 0) },
+            // TC { normal_map: [127u8, 217u8, 217u8], expected_normal: RGBA::new(127, 217, 217, 0) },
+            // TC { normal_map: [127u8, 37u8, 255u8], expected_normal: RGBA::new(127, 37, 255, 0) },
+            // TC { normal_map: [201u8, 201u8, 201u8], expected_normal: RGBA::new(201, 201, 201, 0) },
+            // TC { normal_map: [53u8, 53u8, 201u8], expected_normal: RGBA::new(53, 53, 201, 0) },
+        ];
+        for tc in test_cases {
+            let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(1, 1);
+            color_buffer.fill(RGBA::new(0, 0, 0, 255).to_u32());
+            let mut normal_buffer = TiledBuffer::<u32, 64, 64>::new(1, 1);
+            normal_buffer.fill(0);
+            let mut rasterizer = Rasterizer::new();
+            rasterizer.setup(Viewport::new(0, 0, 1, 1));
+            let albedo_texture = Texture::new(&TextureSource {
+                texels: &vec![255u8, 0u8, 0u8],
+                width: 1,
+                height: 1,
+                format: TextureFormat::RGB,
+            });
+            let normal_map = Texture::new(&TextureSource {
+                texels: &tc.normal_map,
+                width: 1,
+                height: 1,
+                format: TextureFormat::RGB,
+            });
+            rasterizer.commit(&RasterizationCommand {
+                world_positions: &[Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0)],
+                tex_coords: &[Vec2::new(0.5, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0)],
+                normals: &[tc.vertex_normal, tc.vertex_normal, tc.vertex_normal],
+                texture: Some(albedo_texture),
+                normal_map: Some(normal_map),
+                ..Default::default()
+            });
+            rasterizer.draw(&mut Framebuffer {
+                color_buffer: Some(&mut color_buffer),
+                normal_buffer: Some(&mut normal_buffer),
+                ..Default::default()
+            });
+            assert_rgba_eq!(RGBA::from_u32(normal_buffer.at(0, 0)), tc.expected_normal, 5);
         }
     }
 }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sdl3 = { version = "0", features = [] }
+sdl3 = { version = "0.15", features = [] }
 wavefront_obj = "11.0.0"
 nih = { path = "../nih" }
 once_cell = "1.21.3"

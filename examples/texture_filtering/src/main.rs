@@ -2,7 +2,7 @@ use nih::math::*;
 use nih::render::*;
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
-use sdl3::pixels::PixelFormatEnum;
+use sdl3::pixels::PixelFormat;
 use sdl3::surface::Surface;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -96,7 +96,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Blit the framebuffer to the window
         let mut flat = color_buffer.as_flat_buffer();
         let mut windows_surface = window.surface(&event_pump)?;
-        Surface::from_data(flat.as_u8_slice_mut(), size.0, size.1, size.0 * 4, PixelFormatEnum::ABGR8888.into())
+        Surface::from_data(flat.as_u8_slice_mut(), size.0, size.1, size.0 * 4, PixelFormat::ABGR8888.into())
             .unwrap()
             .blit(None, &mut windows_surface, None)?;
         windows_surface.finish()?;

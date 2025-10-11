@@ -1780,7 +1780,7 @@ mod tests_alpha_blending {
                     let expected: u8 =
                         (((foreground as f32 / 255.0) * (alpha as f32 / 255.0) + (background as f32 / 255.0)) * 255.0)
                             .min(255.0) as u8;
-                    assert_rgba_eq!(RGBA::from_u32(color_buffer.at(0, 0)), RGBA::new(expected, 0, 0, 255), 20);
+                    assert_rgba_eq!(RGBA::from_u32(color_buffer.at(0, 0)), RGBA::new(expected, 0, 0, 255), 2);
                 }
             }
         }

@@ -14,7 +14,7 @@ use nih::util::profiler::Profiler;
 use once_cell::sync::Lazy;
 use sdl3::event::Event;
 use sdl3::keyboard::{Keycode, Mod};
-use sdl3::pixels::PixelFormatEnum;
+use sdl3::pixels::PixelFormat;
 use sdl3::rect::Rect;
 use sdl3::surface::Surface;
 
@@ -76,7 +76,7 @@ fn blit_to_window(buffer: &mut Buffer<u32>, window: &sdl3::video::Window, event_
     let height = buffer.height as u32;
     let pitch = (buffer.stride * 4) as u32;
     let buffer_surface =
-        Surface::from_data(buffer.as_u8_slice_mut(), width, height, pitch, PixelFormatEnum::ABGR8888.into()).unwrap();
+        Surface::from_data(buffer.as_u8_slice_mut(), width, height, pitch, PixelFormat::ABGR8888.into()).unwrap();
 
     let mut windows_surface = window.surface(&event_pump).unwrap();
     assert_eq!(windows_surface.width(), width);
@@ -101,7 +101,7 @@ fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, even
 
     let width = buffer.width as u32;
     let height = buffer.height as u32;
-    let mut buffer_surface = Surface::new(width, height, PixelFormatEnum::ABGR8888.into()).unwrap();
+    let mut buffer_surface = Surface::new(width, height, PixelFormat::ABGR8888.into()).unwrap();
     let pitch = buffer_surface.pitch() as usize;
     buffer_surface.with_lock_mut(|pixels: &mut [u8]| {
         for y in 0..buffer.height {
@@ -136,7 +136,7 @@ fn blit_depth_to_window(buffer: &Buffer<u16>, window: &sdl3::video::Window, even
 fn blit_normals_to_window(buffer: &Buffer<u32>, window: &sdl3::video::Window, event_pump: &sdl3::EventPump) {
     let width = buffer.width as u32;
     let height = buffer.height as u32;
-    let mut buffer_surface = Surface::new(width, height, PixelFormatEnum::ABGR8888.into()).unwrap();
+    let mut buffer_surface = Surface::new(width, height, PixelFormat::ABGR8888.into()).unwrap();
     let pitch = buffer_surface.pitch() as usize;
     buffer_surface.with_lock_mut(|pixels: &mut [u8]| {
         for y in 0..buffer.height {
