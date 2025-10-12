@@ -1012,6 +1012,8 @@ impl Rasterizer {
             let mut v_over_w_row: f32 = v_over_w_min; // starting v/w
             let mut inv_w_row: f32 = inv_w_min; // starting 1/w
 
+            // The maximum horizontal span of the triangle
+            let row_steps: u32 = (xmax - xmin + 1) as u32;
             for _y in ymin..=ymax {
                 let mut depth_edges_24_8: U32x4 = depth_edges_24_8_row;
                 let mut inv_w: f32 = inv_w_row;
@@ -1043,10 +1045,52 @@ impl Rasterizer {
                     ptr::null_mut()
                 };
 
-                for _x in xmin..=xmax {
+                // Step in a tight loop until we're inside a triangle
+                let mut steps: u32 = row_steps;
+                while depth_edges_24_8.bitand(edge_simd_non_negative_mask).any_nonzero() && steps != 0 {
+                    depth_edges_24_8 = depth_edges_24_8.add(depth_edges_24_8_dx);
+                    steps -= 1;
+                }
+
+                // Shift the interpolators by the skipped steps
+                if steps != row_steps && steps > 0 {
+                    let skipped: u32 = row_steps - steps;
+                    let skipped_f: f32 = skipped as f32;
+                    inv_w = inv_w_dx.mul_add(skipped_f, inv_w);
+                    r_over_w = r_over_w_dx.mul_add(skipped_f, r_over_w);
+                    g_over_w = g_over_w_dx.mul_add(skipped_f, g_over_w);
+                    b_over_w = b_over_w_dx.mul_add(skipped_f, b_over_w);
+                    a_over_w = a_over_w_dx.mul_add(skipped_f, a_over_w);
+                    nx_over_w = nx_over_w_dx.mul_add(skipped_f, nx_over_w);
+                    ny_over_w = ny_over_w_dx.mul_add(skipped_f, ny_over_w);
+                    nz_over_w = nz_over_w_dx.mul_add(skipped_f, nz_over_w);
+                    tx_over_w = tx_over_w_dx.mul_add(skipped_f, tx_over_w);
+                    ty_over_w = ty_over_w_dx.mul_add(skipped_f, ty_over_w);
+                    tz_over_w = tz_over_w_dx.mul_add(skipped_f, tz_over_w);
+                    u_over_w = u_over_w_dx.mul_add(skipped_f, u_over_w);
+                    v_over_w = v_over_w_dx.mul_add(skipped_f, v_over_w);
+                    if HAS_COLOR_BUFFER {
+                        unsafe {
+                            color_ptr = color_ptr.add(skipped as usize);
+                        }
+                    }
+                    if HAS_DEPTH_BUFFER {
+                        unsafe {
+                            depth_ptr = depth_ptr.add(skipped as usize);
+                        }
+                    }
+                    if NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8 {
+                        unsafe {
+                            normal_ptr = normal_ptr.add(skipped as usize);
+                        }
+                    }
+                }
+
+                // Iterate over the triangle
+                'triangle_body: while steps != 0 {
                     'fragment: {
                         if depth_edges_24_8.bitand(edge_simd_non_negative_mask).any_nonzero() {
-                            break 'fragment; // discard - out of triangle bounds
+                            break 'triangle_body; // stop the entire row - out of the triangle bounds, no need to iterate further
                         }
                         if HAS_DEPTH_BUFFER {
                             let z_u16: u16 = (depth_edges_24_8.extract_lane0() >> 8) as u16;
@@ -1159,6 +1203,7 @@ impl Rasterizer {
                             statistics.fragments_drawn += 1;
                         }
                     }
+                    steps -= 1;
                     depth_edges_24_8 = depth_edges_24_8.add(depth_edges_24_8_dx);
                     inv_w += inv_w_dx;
                     r_over_w += r_over_w_dx;
@@ -1218,7 +1263,7 @@ impl Rasterizer {
                         normal_row_ptr = normal_row_ptr.add(Framebuffer::TILE_WITH as usize);
                     }
                 }
-            }
+            } // end of the vertical loop
         }
         statistics
     }

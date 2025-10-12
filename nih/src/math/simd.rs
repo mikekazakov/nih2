@@ -103,6 +103,25 @@ impl U32x4 {
     }
 
     #[inline(always)]
+    pub fn all_zero(self) -> bool {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                // _mm_testz_si128 returns 1 if all bits are zero
+                _mm_testz_si128(self.inner, self.inner) != 0
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                // all zero means no lane is nonzero
+                vmaxvq_u32(self.inner) == 0
+            }
+        }
+    }
+
+    #[inline(always)]
     pub fn extract_lane0(self) -> u32 {
         unsafe {
             #[cfg(target_arch = "x86_64")]
