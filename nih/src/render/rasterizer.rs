@@ -66,6 +66,13 @@ pub struct RasterizationCommand<'a> {
     // If disabled, the fragment color will be written as is.
     // Default: None.
     pub alpha_blending: AlphaBlendingMode,
+
+    // Sets an optional alpha test to be performed before writing fragments to the framebuffer.
+    // Only the sampled texture value is considered, i.e. the test is performed before mixing with the interpolated vertex color.
+    // The test is formulated as "fragment.a >= alpha_test".
+    // The comparison function is fixed to "greater than or equal to".
+    // Zero value (default) effectively disables the test.
+    pub alpha_test: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +81,7 @@ struct ScheduledCommand {
     normal_map: Option<std::sync::Arc<Texture>>,
     sampling_filter: SamplerFilter,
     alpha_blending: AlphaBlendingMode,
+    alpha_test: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -220,6 +228,16 @@ impl Rasterizer {
 
         self.viewport = viewport;
         self.viewport_scale = ViewportScale::new(viewport);
+        self.vertices.clear();
+        self.commands.clear();
+        self.stats = RasterizerStatistics::new();
+    }
+
+    // Reset draw commands and statistics.
+    pub fn reset(&mut self) {
+        for tile in &mut self.tiles {
+            tile.triangles.clear();
+        }
         self.vertices.clear();
         self.commands.clear();
         self.stats = RasterizerStatistics::new();
@@ -426,6 +444,7 @@ impl Rasterizer {
             normal_map: command.normal_map.clone(),
             sampling_filter: command.sampling_filter,
             alpha_blending: command.alpha_blending,
+            alpha_test: command.alpha_test,
         };
         if self.commands.is_empty() || self.commands.last().unwrap() != &required_scheduled_command {
             self.commands.push(required_scheduled_command);
@@ -622,8 +641,8 @@ impl Rasterizer {
     }
 
     fn is_top_left_24_8(edge_x: i32, edge_y: i32) -> bool {
-        ( edge_y < 0 ) || // left edge
-        ( edge_y == 0 && edge_x > 0 ) // top edge
+        (edge_y < 0) || // left edge
+            (edge_y == 0 && edge_x > 0) // top edge
         // NB!
         // This says "an edge that is exactly horizontal", but perhaps some epsilon is still needed...
         // https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-rasterizer-stage-rules
@@ -651,6 +670,7 @@ impl Rasterizer {
         } else {
             NormalsProcessingMode::None as u8
         };
+        let alpha_test_enabled: bool = command.alpha_test > 0u8;
 
         let mut idx = 0;
         idx += has_color as usize;
@@ -662,6 +682,8 @@ impl Rasterizer {
         idx += has_texture as usize;
         idx *= 3; // three options for alpha blending
         idx += alpha_blending_mode as usize;
+        idx *= 2; // two options for alpha test
+        idx += alpha_test_enabled as usize;
         DRAW_TRIANGLE_FUNCTIONS[idx](self, framebuffer, local_viewport, vertices, command)
     }
 
@@ -671,6 +693,7 @@ impl Rasterizer {
         const NORMALS_PROCESSING: u8,
         const HAS_TEXTURE: bool,
         const ALPHA_BLENDING: u8,
+        const ALPHA_TEST_ENABLED: bool,
     >(
         &self,
         framebuffer: &mut FramebufferTile,
@@ -707,6 +730,7 @@ impl Rasterizer {
             - framebuffer.origin_y()
             - 1) as i32;
 
+        let alpha_test_threshold: u8 = command.alpha_test;
         for i in 0..triangles_num {
             let v0 = &vertices[i * 3 + 0];
             let v1 = &vertices[i * 3 + 1];
@@ -1092,16 +1116,18 @@ impl Rasterizer {
                         if depth_edges_24_8.bitand(edge_simd_non_negative_mask).any_nonzero() {
                             break 'triangle_body; // stop the entire row - out of the triangle bounds, no need to iterate further
                         }
-                        if HAS_DEPTH_BUFFER {
+
+                        let z_u16: u16 = if HAS_DEPTH_BUFFER {
                             let z_u16: u16 = (depth_edges_24_8.extract_lane0() >> 8) as u16;
                             unsafe {
-                                if z_u16 < *depth_ptr {
-                                    *depth_ptr = z_u16;
-                                } else {
+                                if z_u16 >= *depth_ptr {
                                     break 'fragment; // discard - failed the depth test
                                 }
                             }
-                        }
+                            z_u16
+                        } else {
+                            0u16 // fake value just to keep the compiler happy, never actually materialized
+                        };
 
                         let inv_inv_w: f32 = 1.0 / inv_w;
 
@@ -1115,6 +1141,10 @@ impl Rasterizer {
                                 RGBA::new(255, 255, 255, 255)
                             };
 
+                            if ALPHA_TEST_ENABLED && tex_fragment.a < alpha_test_threshold {
+                                break 'fragment;
+                            }
+
                             // Recover interpolated per-fragment color
                             let interpolated_r: f32 = r_over_w * inv_inv_w;
                             let interpolated_g: f32 = g_over_w * inv_inv_w;
@@ -1126,8 +1156,6 @@ impl Rasterizer {
                             let g: u8 = (interpolated_g * tex_fragment.g as f32).clamp(0.0, 255.0) as u8;
                             let b: u8 = (interpolated_b * tex_fragment.b as f32).clamp(0.0, 255.0) as u8;
                             let a: u8 = (interpolated_a * tex_fragment.a as f32).clamp(0.0, 255.0) as u8;
-
-                            // TODO: conditional alpha-test?
 
                             // Build the dest color
                             let color: u32 = if ALPHA_BLENDING == AlphaBlendingMode::Normal as u8 {
@@ -1156,6 +1184,14 @@ impl Rasterizer {
                             // Write the fragment color into the framebuffer
                             unsafe {
                                 *color_ptr = color;
+                            }
+                        }
+
+                        // Write into the depth buffer AFTER the color buffer because the alpha-test can discard the fragment.
+                        // Writing the depth of a fragment which is discarded is incorrect, hence it's delayed.
+                        if HAS_DEPTH_BUFFER {
+                            unsafe {
+                                *depth_ptr = z_u16;
                             }
                         }
 
@@ -1290,21 +1326,27 @@ fn panicking_draw_triangles(
     panic!("Dummy, should never be called");
 }
 
-const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 72;
+const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 144;
 const DRAW_TRIANGLE_FUNCTIONS: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] = {
     let mut functions: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] =
         [panicking_draw_triangles; DRAW_TRIANGLE_FUNCTIONS_NUM];
     macro_rules! draw_triangles_instantiate_function {
-            ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr) => {
-                $t[$i] = Rasterizer::draw_triangles::<$a, $b, $c, $d, $e>;
+            ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr, $f:expr) => {
+                $t[$i] = Rasterizer::draw_triangles::<$a, $b, $c, $d, $e, $f>;
                 $i += 1;
             };
         }
+    macro_rules! draw_triangles_per_alpha_test_enabled {
+        ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr) => {
+            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, false);
+            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, true);
+        };
+    }
     macro_rules! draw_triangles_per_alpha_blending {
         ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr) => {
-            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, 0u8);
-            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, 1u8);
-            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, 2u8);
+            draw_triangles_per_alpha_test_enabled!($t, $i, $a, $b, $c, $d, 0u8);
+            draw_triangles_per_alpha_test_enabled!($t, $i, $a, $b, $c, $d, 1u8);
+            draw_triangles_per_alpha_test_enabled!($t, $i, $a, $b, $c, $d, 2u8);
         };
     }
     macro_rules! draw_triangles_per_has_texture {
@@ -1406,6 +1448,7 @@ impl Default for RasterizationCommand<'_> {
             normal_map: None,
             sampling_filter: SamplerFilter::Nearest,
             alpha_blending: AlphaBlendingMode::None,
+            alpha_test: 0u8,
         }
     }
 }
@@ -1417,6 +1460,7 @@ impl Default for ScheduledCommand {
             normal_map: None,
             sampling_filter: SamplerFilter::Nearest,
             alpha_blending: AlphaBlendingMode::None,
+            alpha_test: 0u8,
         }
     }
 }
@@ -1427,6 +1471,9 @@ impl PartialEq for ScheduledCommand {
             return false;
         }
         if self.alpha_blending != other.alpha_blending {
+            return false;
+        }
+        if self.alpha_test != other.alpha_test {
             return false;
         }
 

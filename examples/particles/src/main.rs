@@ -135,6 +135,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             texture: Some(texture.clone()),
             sampling_filter: SamplerFilter::Bilinear,
             alpha_blending: AlphaBlendingMode::Additive,
+            alpha_test: 2u8,
             projection: Mat44::perspective(1.0, 20.0, std::f32::consts::PI / 3.0, size.0 as f32 / size.1 as f32),
             ..Default::default()
         });

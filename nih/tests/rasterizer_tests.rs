@@ -1786,3 +1786,70 @@ mod tests_alpha_blending {
         }
     }
 }
+
+#[cfg(test)]
+mod tests_alpha_test {
+    use super::*;
+
+    #[test]
+    fn alpha_test() {
+        let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(1u16, 1u16);
+        let mut depth_buffer = TiledBuffer::<u16, 64, 64>::new(1u16, 1u16);
+        let mut normal_buffer = TiledBuffer::<u32, 64, 64>::new(1u16, 1u16);
+        let mut rasterizer = Rasterizer::new();
+        rasterizer.setup(Viewport::new(0, 0, 1u16, 1u16));
+        let pos = [Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0)];
+        let tex_coords = [Vec2::new(0.5, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0)];
+
+        struct TC {
+            texture_alpha: u8,
+            alpha_test: u8,
+            expected_discard: bool,
+        }
+
+        let test_cases = vec![
+            TC { texture_alpha: 255u8, alpha_test: 255u8, expected_discard: false },
+            TC { texture_alpha: 255u8, alpha_test: 127u8, expected_discard: false },
+            TC { texture_alpha: 255u8, alpha_test: 0u8, expected_discard: false },
+            TC { texture_alpha: 127u8, alpha_test: 255u8, expected_discard: true },
+            TC { texture_alpha: 127u8, alpha_test: 128u8, expected_discard: true },
+            TC { texture_alpha: 127u8, alpha_test: 127u8, expected_discard: false },
+            TC { texture_alpha: 127u8, alpha_test: 0u8, expected_discard: false },
+            TC { texture_alpha: 0u8, alpha_test: 255u8, expected_discard: true },
+            TC { texture_alpha: 0u8, alpha_test: 127u8, expected_discard: true },
+            TC { texture_alpha: 0u8, alpha_test: 1u8, expected_discard: true },
+            TC { texture_alpha: 0u8, alpha_test: 0u8, expected_discard: false },
+        ];
+        for tc in test_cases {
+            let texture = Texture::new(&TextureSource {
+                texels: &[255u8, 255u8, 255u8, tc.texture_alpha],
+                width: 1,
+                height: 1,
+                format: TextureFormat::RGBA,
+            });
+            color_buffer.fill(0u32);
+            depth_buffer.fill(u16::MAX);
+            normal_buffer.fill(0u32);
+            rasterizer.reset();
+            rasterizer.commit(&RasterizationCommand {
+                world_positions: &pos,
+                texture: Some(texture),
+                tex_coords: &tex_coords,
+                alpha_test: tc.alpha_test,
+                ..Default::default()
+            });
+            rasterizer.draw(&mut Framebuffer {
+                color_buffer: Some(&mut color_buffer),
+                depth_buffer: Some(&mut depth_buffer),
+                normal_buffer: Some(&mut normal_buffer),
+                ..Default::default()
+            });
+            let color_discarded = color_buffer.at(0, 0) == 0;
+            assert_eq!(color_discarded, tc.expected_discard);
+            let depth_discarded = depth_buffer.at(0, 0) == u16::MAX;
+            assert_eq!(depth_discarded, tc.expected_discard);
+            let normal_discarded = normal_buffer.at(0, 0) == 0;
+            assert_eq!(normal_discarded, tc.expected_discard);
+        }
+    }
+}
