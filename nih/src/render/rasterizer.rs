@@ -32,6 +32,19 @@ pub enum AlphaBlendingMode {
     Additive = 2,
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VerticesColorInterpolationMode {
+    // There's no color information given for the triangle, assume (255, 255, 255, 255)
+    None = 0,
+
+    // later:
+    // Fixed per triangle
+
+    // Triangle contains different per-vertex colors that must be interpolated.
+    PerVertex = 1,
+}
+
 #[derive(Debug, Clone)]
 pub struct RasterizationCommand<'a> {
     pub world_positions: &'a [Vec3],
@@ -82,6 +95,7 @@ struct ScheduledCommand {
     sampling_filter: SamplerFilter,
     alpha_blending: AlphaBlendingMode,
     alpha_test: u8,
+    color_interpolation: VerticesColorInterpolationMode,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -281,6 +295,10 @@ impl Rasterizer {
             || (command_color.z - 1.0).abs() > 0.005
             || (command_color.w - 1.0).abs() > 0.005;
 
+        // Gather per-batch color interpolation mode.
+        // That's conservative, i.e. a single triangle with color information will cause the whole batch to be color interpolated.
+        let mut color_interpolation_mode: VerticesColorInterpolationMode = VerticesColorInterpolationMode::None;
+
         for i in 0..input_triangles_num {
             let index = |n: usize| {
                 if use_explicit_indices {
@@ -382,6 +400,16 @@ impl Rasterizer {
                 }
             }
 
+            // Pessimize the color interpolation mode depending on the colors of this triangle
+            if color_interpolation_mode != VerticesColorInterpolationMode::PerVertex {
+                if (input_vertices[0].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length() > 0.01
+                    || (input_vertices[1].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length() > 0.01
+                    || (input_vertices[2].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length() > 0.01
+                {
+                    color_interpolation_mode = VerticesColorInterpolationMode::PerVertex;
+                }
+            }
+
             // TODO: cull earlier????
             // Why try clipping the triangle if it's not visible?
 
@@ -449,6 +477,7 @@ impl Rasterizer {
             sampling_filter: command.sampling_filter,
             alpha_blending: command.alpha_blending,
             alpha_test: command.alpha_test,
+            color_interpolation: color_interpolation_mode,
         };
         if self.commands.is_empty() || self.commands.last().unwrap() != &required_scheduled_command {
             self.commands.push(required_scheduled_command);
@@ -679,6 +708,7 @@ impl Rasterizer {
             NormalsProcessingMode::None as u8
         };
         let alpha_test_enabled: bool = command.alpha_test > 0u8;
+        let color_interpolation_mode: u8 = command.color_interpolation as u8;
 
         let mut idx = 0;
         idx += has_color as usize;
@@ -692,6 +722,8 @@ impl Rasterizer {
         idx += alpha_blending_mode as usize;
         idx *= 2; // two options for alpha test
         idx += alpha_test_enabled as usize;
+        idx *= 2; // two options for color interpolation
+        idx += color_interpolation_mode as usize;
         DRAW_TRIANGLE_FUNCTIONS[idx](self, framebuffer, local_viewport, vertices, command)
     }
 
@@ -702,6 +734,7 @@ impl Rasterizer {
         const HAS_TEXTURE: bool,
         const ALPHA_BLENDING: u8,
         const ALPHA_TEST_ENABLED: bool,
+        const COLOR_INTERPOLATION_MODE: u8,
     >(
         &self,
         framebuffer: &mut FramebufferTile,
@@ -1089,18 +1122,26 @@ impl Rasterizer {
                     let skipped: u32 = row_steps - steps;
                     let skipped_f: f32 = skipped as f32;
                     inv_w = inv_w_dx.mul_add(skipped_f, inv_w);
-                    r_over_w = r_over_w_dx.mul_add(skipped_f, r_over_w);
-                    g_over_w = g_over_w_dx.mul_add(skipped_f, g_over_w);
-                    b_over_w = b_over_w_dx.mul_add(skipped_f, b_over_w);
-                    a_over_w = a_over_w_dx.mul_add(skipped_f, a_over_w);
-                    nx_over_w = nx_over_w_dx.mul_add(skipped_f, nx_over_w);
-                    ny_over_w = ny_over_w_dx.mul_add(skipped_f, ny_over_w);
-                    nz_over_w = nz_over_w_dx.mul_add(skipped_f, nz_over_w);
-                    tx_over_w = tx_over_w_dx.mul_add(skipped_f, tx_over_w);
-                    ty_over_w = ty_over_w_dx.mul_add(skipped_f, ty_over_w);
-                    tz_over_w = tz_over_w_dx.mul_add(skipped_f, tz_over_w);
-                    u_over_w = u_over_w_dx.mul_add(skipped_f, u_over_w);
-                    v_over_w = v_over_w_dx.mul_add(skipped_f, v_over_w);
+                    if COLOR_INTERPOLATION_MODE == VerticesColorInterpolationMode::PerVertex as u8 {
+                        r_over_w = r_over_w_dx.mul_add(skipped_f, r_over_w);
+                        g_over_w = g_over_w_dx.mul_add(skipped_f, g_over_w);
+                        b_over_w = b_over_w_dx.mul_add(skipped_f, b_over_w);
+                        a_over_w = a_over_w_dx.mul_add(skipped_f, a_over_w);
+                    }
+                    if NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8 {
+                        nx_over_w = nx_over_w_dx.mul_add(skipped_f, nx_over_w);
+                        ny_over_w = ny_over_w_dx.mul_add(skipped_f, ny_over_w);
+                        nz_over_w = nz_over_w_dx.mul_add(skipped_f, nz_over_w);
+                    }
+                    if NORMALS_PROCESSING == NormalsProcessingMode::NormalMapping as u8 {
+                        tx_over_w = tx_over_w_dx.mul_add(skipped_f, tx_over_w);
+                        ty_over_w = ty_over_w_dx.mul_add(skipped_f, ty_over_w);
+                        tz_over_w = tz_over_w_dx.mul_add(skipped_f, tz_over_w);
+                    }
+                    if HAS_TEXTURE {
+                        u_over_w = u_over_w_dx.mul_add(skipped_f, u_over_w);
+                        v_over_w = v_over_w_dx.mul_add(skipped_f, v_over_w);
+                    }
                     if HAS_COLOR_BUFFER {
                         unsafe {
                             color_ptr = color_ptr.add(skipped as usize);
@@ -1153,17 +1194,32 @@ impl Rasterizer {
                                 break 'fragment;
                             }
 
-                            // Recover interpolated per-fragment color
-                            let interpolated_r: f32 = r_over_w * inv_inv_w;
-                            let interpolated_g: f32 = g_over_w * inv_inv_w;
-                            let interpolated_b: f32 = b_over_w * inv_inv_w;
-                            let interpolated_a: f32 = a_over_w * inv_inv_w;
+                            // Color component of this fragment.
+                            // Either a mix of sampled and interpolated colors or a sampled color as-is.
+                            let r: u8;
+                            let g: u8;
+                            let b: u8;
+                            let a: u8;
 
-                            // Multiply the interpolated and texel colors
-                            let r: u8 = (interpolated_r * tex_fragment.r as f32).clamp(0.0, 255.0) as u8;
-                            let g: u8 = (interpolated_g * tex_fragment.g as f32).clamp(0.0, 255.0) as u8;
-                            let b: u8 = (interpolated_b * tex_fragment.b as f32).clamp(0.0, 255.0) as u8;
-                            let a: u8 = (interpolated_a * tex_fragment.a as f32).clamp(0.0, 255.0) as u8;
+                            if COLOR_INTERPOLATION_MODE == VerticesColorInterpolationMode::PerVertex as u8 {
+                                // Recover interpolated per-fragment color
+                                let interpolated_r: f32 = r_over_w * inv_inv_w;
+                                let interpolated_g: f32 = g_over_w * inv_inv_w;
+                                let interpolated_b: f32 = b_over_w * inv_inv_w;
+                                let interpolated_a: f32 = a_over_w * inv_inv_w;
+
+                                // Multiply the interpolated and texel colors
+                                r = (interpolated_r * tex_fragment.r as f32).clamp(0.0, 255.0) as u8;
+                                g = (interpolated_g * tex_fragment.g as f32).clamp(0.0, 255.0) as u8;
+                                b = (interpolated_b * tex_fragment.b as f32).clamp(0.0, 255.0) as u8;
+                                a = (interpolated_a * tex_fragment.a as f32).clamp(0.0, 255.0) as u8;
+                            } else {
+                                // Use the sampled color as-is
+                                r = tex_fragment.r;
+                                g = tex_fragment.g;
+                                b = tex_fragment.b;
+                                a = tex_fragment.a;
+                            }
 
                             // Build the dest color
                             let color: u32 = if ALPHA_BLENDING == AlphaBlendingMode::Normal as u8 {
@@ -1250,18 +1306,26 @@ impl Rasterizer {
                     steps -= 1;
                     depth_edges_24_8 = depth_edges_24_8.add(depth_edges_24_8_dx);
                     inv_w += inv_w_dx;
-                    r_over_w += r_over_w_dx;
-                    g_over_w += g_over_w_dx;
-                    b_over_w += b_over_w_dx;
-                    a_over_w += a_over_w_dx;
-                    nx_over_w += nx_over_w_dx;
-                    ny_over_w += ny_over_w_dx;
-                    nz_over_w += nz_over_w_dx;
-                    tx_over_w += tx_over_w_dx;
-                    ty_over_w += ty_over_w_dx;
-                    tz_over_w += tz_over_w_dx;
-                    u_over_w += u_over_w_dx;
-                    v_over_w += v_over_w_dx;
+                    if COLOR_INTERPOLATION_MODE == VerticesColorInterpolationMode::PerVertex as u8 {
+                        r_over_w += r_over_w_dx;
+                        g_over_w += g_over_w_dx;
+                        b_over_w += b_over_w_dx;
+                        a_over_w += a_over_w_dx;
+                    }
+                    if NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8 {
+                        nx_over_w += nx_over_w_dx;
+                        ny_over_w += ny_over_w_dx;
+                        nz_over_w += nz_over_w_dx;
+                    }
+                    if NORMALS_PROCESSING == NormalsProcessingMode::NormalMapping as u8 {
+                        tx_over_w += tx_over_w_dx;
+                        ty_over_w += ty_over_w_dx;
+                        tz_over_w += tz_over_w_dx;
+                    }
+                    if HAS_TEXTURE {
+                        u_over_w += u_over_w_dx;
+                        v_over_w += v_over_w_dx;
+                    }
                     if HAS_COLOR_BUFFER {
                         unsafe {
                             color_ptr = color_ptr.add(1);
@@ -1280,18 +1344,26 @@ impl Rasterizer {
                 }
                 depth_edges_24_8_row = depth_edges_24_8_row.add(depth_edges_24_8_dy);
                 inv_w_row += inv_w_dy;
-                r_over_w_row += r_over_w_dy;
-                g_over_w_row += g_over_w_dy;
-                b_over_w_row += b_over_w_dy;
-                a_over_w_row += a_over_w_dy;
-                nx_over_w_row += nx_over_w_dy;
-                ny_over_w_row += ny_over_w_dy;
-                nz_over_w_row += nz_over_w_dy;
-                tx_over_w_row += tx_over_w_dy;
-                ty_over_w_row += ty_over_w_dy;
-                tz_over_w_row += tz_over_w_dy;
-                u_over_w_row += u_over_w_dy;
-                v_over_w_row += v_over_w_dy;
+                if COLOR_INTERPOLATION_MODE == VerticesColorInterpolationMode::PerVertex as u8 {
+                    r_over_w_row += r_over_w_dy;
+                    g_over_w_row += g_over_w_dy;
+                    b_over_w_row += b_over_w_dy;
+                    a_over_w_row += a_over_w_dy;
+                }
+                if NORMALS_PROCESSING >= NormalsProcessingMode::Vertex as u8 {
+                    nx_over_w_row += nx_over_w_dy;
+                    ny_over_w_row += ny_over_w_dy;
+                    nz_over_w_row += nz_over_w_dy;
+                }
+                if NORMALS_PROCESSING == NormalsProcessingMode::NormalMapping as u8 {
+                    tx_over_w_row += tx_over_w_dy;
+                    ty_over_w_row += ty_over_w_dy;
+                    tz_over_w_row += tz_over_w_dy;
+                }
+                if HAS_TEXTURE {
+                    u_over_w_row += u_over_w_dy;
+                    v_over_w_row += v_over_w_dy;
+                }
                 if HAS_COLOR_BUFFER {
                     unsafe {
                         color_row_ptr = color_row_ptr.add(Framebuffer::TILE_WITH as usize);
@@ -1351,20 +1423,26 @@ fn panicking_draw_triangles(
     panic!("Dummy, should never be called");
 }
 
-const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 144;
+const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 288;
 const DRAW_TRIANGLE_FUNCTIONS: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] = {
     let mut functions: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] =
         [panicking_draw_triangles; DRAW_TRIANGLE_FUNCTIONS_NUM];
     macro_rules! draw_triangles_instantiate_function {
-            ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr, $f:expr) => {
-                $t[$i] = Rasterizer::draw_triangles::<$a, $b, $c, $d, $e, $f>;
+            ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr, $f:expr, $g:expr) => {
+                $t[$i] = Rasterizer::draw_triangles::<$a, $b, $c, $d, $e, $f, $g>;
                 $i += 1;
             };
         }
+    macro_rules! draw_triangles_per_color_interpolation_mode {
+        ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr, $f:expr) => {
+            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, $f, 0u8);
+            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, $f, 1u8);
+        };
+    }
     macro_rules! draw_triangles_per_alpha_test_enabled {
         ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr) => {
-            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, false);
-            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, true);
+            draw_triangles_per_color_interpolation_mode!($t, $i, $a, $b, $c, $d, $e, false);
+            draw_triangles_per_color_interpolation_mode!($t, $i, $a, $b, $c, $d, $e, true);
         };
     }
     macro_rules! draw_triangles_per_alpha_blending {
@@ -1486,6 +1564,7 @@ impl Default for ScheduledCommand {
             sampling_filter: SamplerFilter::Nearest,
             alpha_blending: AlphaBlendingMode::None,
             alpha_test: 0u8,
+            color_interpolation: VerticesColorInterpolationMode::None,
         }
     }
 }
@@ -1499,6 +1578,9 @@ impl PartialEq for ScheduledCommand {
             return false;
         }
         if self.alpha_test != other.alpha_test {
+            return false;
+        }
+        if self.color_interpolation != other.color_interpolation {
             return false;
         }
 
