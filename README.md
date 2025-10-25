@@ -12,6 +12,7 @@ It's not production-quality and has no practical purpose - it's just the result 
 - Watertight rasterization following the top-left fill rule.
 - Normal and additive alpha-blending.
 - Branchless texture sampling with nearest, bilinear and trilinear filtering.
+- Alpha-testing.
 - Normal mapping.
 
 #### Examples:
@@ -22,3 +23,5 @@ It's not production-quality and has no practical purpose - it's just the result 
   Rendering 1K particles in a single `main()` function in ~150 LoCs.
 - [./examples/normal_mapping](https://github.com/mikekazakov/nih2/tree/main/examples/normal_mapping)  
   Normal mapping and a basic deferred lighting in ~170 LoCs.
+- [./examples/grass](https://github.com/mikekazakov/nih2/tree/main/examples/grass)  
+  Grass simulation and rendering in ~250 LoCs.
