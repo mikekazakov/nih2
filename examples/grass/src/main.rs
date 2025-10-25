@@ -1,7 +1,7 @@
 use nih::math::*;
 use nih::render::*;
-use noise::{NoiseFn, Perlin};
-use rand::Rng;
+use noise::{NoiseFn, Perlin, Seedable};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::pixels::PixelFormat;
@@ -12,7 +12,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sdl_context = sdl3::init()?;
     let video_subsystem = sdl_context.video()?;
     let window = video_subsystem
-        .window("Grass Example | Space - pause, Esc to close", 1280, 720)
+        .window(
+            "Grass Example | Space - pause, N - show normals, W - draw wireframe, L - apply lighting, Esc - close",
+            1280,
+            720,
+        )
         .resizable()
         .build()
         .map_err(|e| e.to_string())?;
@@ -55,9 +59,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     // Random entropy sources
-    let mut rand_gen = rand::rng();
+    let mut rand_gen = SmallRng::seed_from_u64(7);
     let mut rand = |min: f32, max: f32| -> f32 { rand_gen.random_range(min..max) };
-    let perlin = Perlin::default();
+    let perlin = Perlin::default().set_seed(2);
 
     // Generate 17x17=289 bushes
     struct Bush {
@@ -97,7 +101,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rasterizer = Rasterizer::new();
     let mut last = std::time::Instant::now();
     let mut t = 0.0;
-    let mut dt: f32;
     let mut apply_lighting: bool = true;
     let light_dir_neg = -(Vec3::new(-1.0, -1.0, -1.0).normalized());
     let mut show_normals: bool = false;
@@ -121,13 +124,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !paused {
             t += (std::time::Instant::now() - last).as_secs_f32();
         }
-        dt = if paused {
-            0.0
-        } else {
-            (std::time::Instant::now() - last).as_secs_f32()
-        };
         last = std::time::Instant::now();
-        println!("FPS: {:.0}", 1.0 / dt);
 
         // Set up the wind
         let wind_speed: f32 = 100.0; // how fast the wind moves, world units per second
@@ -178,11 +175,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             color_buffer = TiledBuffer::<u32, 64, 64>::new(size.0 as u16, size.1 as u16);
             normal_buffer = TiledBuffer::<u32, 64, 64>::new(size.0 as u16, size.1 as u16);
             depth_buffer = TiledBuffer::<u16, 64, 64>::new(size.0 as u16, size.1 as u16);
+            rasterizer.setup(Viewport::new(0, 0, size.0 as u16, size.1 as u16));
         }
         color_buffer.fill(RGBA::new(102, 204, 255, 255).to_u32());
         normal_buffer.fill(RGBA::new(127, 255, 127, 255).to_u32());
         depth_buffer.fill(u16::MAX);
-        rasterizer.setup(Viewport::new(0, 0, size.0 as u16, size.1 as u16));
+        rasterizer.reset();
         rasterizer.set_draw_wireframe(show_wireframe);
 
         // Commit the draw commands
@@ -216,32 +214,35 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
         // Render into the framebuffer
-        rasterizer.draw(&mut Framebuffer {
+        let mut framebuffer = Framebuffer {
             color_buffer: Some(&mut color_buffer),
             normal_buffer: Some(&mut normal_buffer),
             depth_buffer: Some(&mut depth_buffer),
-        });
+        };
+        rasterizer.draw(&mut framebuffer);
 
         // Apply basic lighting
         if apply_lighting {
-            for y in 0..size.1 as u16 {
-                for x in 0..size.0 as u16 {
-                    if depth_buffer.at(x, y) < u16::MAX {
-                        let normal_rgba: RGBA = RGBA::from_u32(normal_buffer.at(x, y));
-                        let normal: Vec3 =
-                            (Vec3::new(normal_rgba.r as f32, normal_rgba.g as f32, normal_rgba.b as f32)
-                                - Vec3::new(127.0, 127.0, 127.0))
-                                / 128.0;
+            framebuffer.for_each_tile_mut_parallel(move |tile| {
+                let depth_tile = tile.depth_buffer.as_mut().unwrap();
+                let color_tile = tile.color_buffer.as_mut().unwrap();
+                let normal_tile = tile.normal_buffer.as_mut().unwrap();
+                for y in 0..depth_tile.height as usize {
+                    for x in 0..depth_tile.width as usize {
+                        if depth_tile.at_unchecked(x, y) == u16::MAX {
+                            continue;
+                        }
+                        let normal: Vec3 = decode_normal_from_color(RGBA::from_u32(normal_tile.at_unchecked(x, y)));
                         let ambient: f32 = 0.6;
                         let diffuse: f32 = 0.6 * dot(normal, light_dir_neg).max(0.0);
-                        let color_rgba: RGBA = RGBA::from_u32(color_buffer.at(x, y));
+                        let color_rgba: RGBA = RGBA::from_u32(color_tile.at_unchecked(x, y));
                         let color_vec: Vec3 = Vec3::new(color_rgba.r as f32, color_rgba.g as f32, color_rgba.b as f32);
-                        let color_lit: Vec3 = (color_vec * (diffuse + ambient)).clamped(0.0, 255.0);
+                        let color_lit: Vec3 = (color_vec * (diffuse + ambient)).min(255.0);
                         let final_color: RGBA = RGBA::new(color_lit.x as u8, color_lit.y as u8, color_lit.z as u8, 255);
-                        *color_buffer.at_mut(x, y) = final_color.to_u32();
+                        *color_tile.get_unchecked(x, y) = final_color.to_u32();
                     }
                 }
-            }
+            });
         }
 
         // Blit the framebuffer to the window

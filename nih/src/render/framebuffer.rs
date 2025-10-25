@@ -44,6 +44,26 @@ impl Framebuffer<'_> {
         return 0;
     }
 
+    pub fn tiles_x(&self) -> u16 {
+        if let Some(buffer) = &self.color_buffer {
+            return buffer.tiles_x();
+        }
+        if let Some(buffer) = &self.depth_buffer {
+            return buffer.tiles_x();
+        }
+        return 0;
+    }
+
+    pub fn tiles_y(&self) -> u16 {
+        if let Some(buffer) = &self.color_buffer {
+            return buffer.tiles_y();
+        }
+        if let Some(buffer) = &self.depth_buffer {
+            return buffer.tiles_y();
+        }
+        return 0;
+    }
+
     pub fn tile(&mut self, x: u16, y: u16) -> FramebufferTile {
         FramebufferTile {
             color_buffer: if let Some(buffer) = self.color_buffer.as_mut() {
@@ -61,6 +81,29 @@ impl Framebuffer<'_> {
             } else {
                 None
             },
+        }
+    }
+
+    pub fn for_each_tile_mut_parallel<F>(&mut self, f: F)
+    where
+        F: Fn(&mut FramebufferTile) + Send + Sync + 'static,
+    {
+        let tiles_x: u16 = self.tiles_x();
+        let tiles_y: u16 = self.tiles_y();
+        if tiles_x > 1 || tiles_y > 1 {
+            let mut tiles: Vec<FramebufferTile> = Vec::<FramebufferTile>::new();
+            for y in 0..tiles_y {
+                for x in 0..tiles_x {
+                    tiles.push(self.tile(x, y));
+                }
+            }
+            use rayon::prelude::*;
+            tiles.par_iter_mut().for_each(|tile| {
+                f(tile);
+            });
+        } else {
+            let mut tile: FramebufferTile = self.tile(0, 0);
+            f(&mut tile);
         }
     }
 }

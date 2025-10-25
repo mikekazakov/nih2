@@ -1,3 +1,4 @@
+use crate::math::Vec3;
 use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
@@ -28,4 +29,10 @@ impl RGBA {
         // }
         bytemuck::cast(packed)
     }
+}
+
+pub fn decode_normal_from_color(color: RGBA) -> Vec3 {
+    let normal: Vec3 =
+        (Vec3::new(color.r as f32, color.g as f32, color.b as f32) - Vec3::new(127.0, 127.0, 127.0)) / 128.0;
+    normal
 }

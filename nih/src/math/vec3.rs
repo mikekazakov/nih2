@@ -28,6 +28,10 @@ impl Vec3 {
         Vec3 { x: self.x.clamp(min, max), y: self.y.clamp(min, max), z: self.z.clamp(min, max) }
     }
 
+    pub fn min(self, min: f32) -> Vec3 {
+        Vec3 { x: self.x.min(min), y: self.y.min(min), z: self.z.min(min) }
+    }
+
     pub fn as_vector4(self) -> Vec4 {
         Vec4 { x: self.x, y: self.y, z: self.z, w: 0. }
     }

@@ -37,6 +37,10 @@ pub struct TiledBufferTileMut<T, const W: usize, const H: usize> {
 
 const _: [(); 1] = [(); (size_of::<TiledBufferTile<u16, 64, 64>>() == 16) as usize];
 const _: [(); 1] = [(); (size_of::<TiledBufferTileMut<u16, 64, 64>>() == 16) as usize];
+unsafe impl<T, const W: usize, const H: usize> Send for TiledBufferTile<T, W, H> {}
+unsafe impl<T, const W: usize, const H: usize> Sync for TiledBufferTile<T, W, H> {}
+unsafe impl<T, const W: usize, const H: usize> Send for TiledBufferTileMut<T, W, H> {}
+unsafe impl<T, const W: usize, const H: usize> Sync for TiledBufferTileMut<T, W, H> {}
 
 impl<T: Copy + Clone, const W: usize, const H: usize> TiledBufferTile<T, W, H> {
     pub const WIDTH: usize = W;
@@ -69,10 +73,33 @@ impl<T: Copy + Clone, const W: usize, const H: usize> TiledBufferTile<T, W, H> {
     }
 }
 
-impl<T, const W: usize, const H: usize> TiledBufferTileMut<T, W, H> {
+impl<T, const W: usize, const H: usize> TiledBufferTileMut<T, W, H>
+where
+    T: Copy,
+{
     pub const WIDTH: usize = W;
     pub const HEIGHT: usize = H;
     pub const STRIDE: usize = W * std::mem::size_of::<T>();
+
+    /// Returns a value of the element at (x, y) with bounds checking.
+    /// Panics if (x, y) is out of the tile’s logical bounds.
+    pub fn at(&self, x: usize, y: usize) -> T {
+        if x >= self.width as usize || y >= self.height as usize {
+            panic!(
+                "TiledBufferTile index out of bounds: ({}, {}) not in (0..{}, 0..{})",
+                x, y, self.width, self.height
+            );
+        }
+
+        // safe because bounds were checked
+        unsafe { *self.ptr.add(y * W + x) }
+    }
+
+    /// Returns a value of the element at (x, y) without bounds checking.
+    pub fn at_unchecked(&self, x: usize, y: usize) -> T {
+        debug_assert!(x < self.width as usize && y < self.height as usize);
+        unsafe { *self.ptr.add(y * W + x) }
+    }
 
     /// Returns a mutable reference to the element at (x, y) with bounds checking.
     /// Panics if (x, y) is out of the tile’s logical bounds.
