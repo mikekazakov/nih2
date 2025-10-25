@@ -191,8 +191,15 @@ pub fn draw_screen_lines_unclipped(framebuffer: &mut Framebuffer, lines: &[Vec2]
         return;
     }
 
+    if framebuffer.color_buffer.is_none() {
+        return;
+    }
+
     let rgba = vec4_to_rgba(color);
-    let mut color_buf_opt = framebuffer.color_buffer.as_deref_mut();
+    let color_buf = framebuffer.color_buffer.as_deref_mut().unwrap();
+
+    let width = color_buf.width();
+    let height = color_buf.height();
 
     let mut i = 0;
 
@@ -223,8 +230,8 @@ pub fn draw_screen_lines_unclipped(framebuffer: &mut Framebuffer, lines: &[Vec2]
             let screen_x = if steep { y } else { x };
             let screen_y = if steep { x } else { y };
 
-            if let Some(ref mut buf) = color_buf_opt {
-                let dst = buf.at_mut(screen_x as u16, screen_y as u16);
+            if screen_x >= 0 && screen_x < width as i32 && screen_y >= 0 && screen_y < height as i32 {
+                let dst = color_buf.at_mut(screen_x as u16, screen_y as u16);
                 if rgba.a == 255 {
                     *dst = rgba.to_u32();
                 } else {

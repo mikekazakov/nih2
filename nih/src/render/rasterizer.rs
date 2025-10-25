@@ -163,6 +163,7 @@ pub struct Rasterizer {
     tiles_y: u16,
     stats: RasterizerStatistics,
     debug_coloring: bool,
+    draw_wireframe: bool,
 }
 
 impl Default for Tile {
@@ -190,6 +191,7 @@ impl Rasterizer {
             tiles_y: 1,
             stats: RasterizerStatistics::new(),
             debug_coloring: false,
+            draw_wireframe: false,
         };
     }
 
@@ -291,17 +293,19 @@ impl Rasterizer {
             let i1: usize = index(1);
             let i2: usize = index(2);
 
+            // Fill world positions of the triangle vertices.
+            let world_positions: [Vec3; 3] = [
+                command.model * command.world_positions[i0],
+                command.model * command.world_positions[i1],
+                command.model * command.world_positions[i2],
+            ];
+
             let mut input_vertices: [Vertex; 3] = [Vertex::default(); 3];
 
-            // Fill world positions of the triangle vertices.
-            input_vertices[0].world_position = command.model * command.world_positions[i0];
-            input_vertices[1].world_position = command.model * command.world_positions[i1];
-            input_vertices[2].world_position = command.model * command.world_positions[i2];
-
             // Fill projected positions in NDC space [-1, 1].
-            input_vertices[0].position = view_projection * input_vertices[0].world_position.as_point4();
-            input_vertices[1].position = view_projection * input_vertices[1].world_position.as_point4();
-            input_vertices[2].position = view_projection * input_vertices[2].world_position.as_point4();
+            input_vertices[0].position = view_projection * world_positions[0].as_point4();
+            input_vertices[1].position = view_projection * world_positions[1].as_point4();
+            input_vertices[2].position = view_projection * world_positions[2].as_point4();
 
             // Fill per-vertex texture coordinates.
             if command.tex_coords.is_empty() {
@@ -317,8 +321,8 @@ impl Rasterizer {
             // Fill normals, either with rotated input normals or derived from the triangle face.
             if command.normals.is_empty() {
                 // Derive a uniform non-smooth normal vector from the triangle's vertices.
-                let edge1 = input_vertices[1].world_position - input_vertices[0].world_position;
-                let edge2 = input_vertices[2].world_position - input_vertices[0].world_position;
+                let edge1 = world_positions[1] - world_positions[0];
+                let edge2 = world_positions[2] - world_positions[0];
                 let face_normal = cross(edge1, edge2).normalized();
                 input_vertices[0].normal = face_normal;
                 input_vertices[1].normal = face_normal;
@@ -334,8 +338,8 @@ impl Rasterizer {
                 // Derive a uniform non-smooth tangent vector from the triangle's vertices.
                 let uv1: Vec2 = input_vertices[1].tex_coord - input_vertices[0].tex_coord;
                 let uv2: Vec2 = input_vertices[2].tex_coord - input_vertices[0].tex_coord;
-                let e1: Vec3 = input_vertices[1].world_position - input_vertices[0].world_position;
-                let e2: Vec3 = input_vertices[2].world_position - input_vertices[0].world_position;
+                let e1: Vec3 = world_positions[1] - world_positions[0];
+                let e2: Vec3 = world_positions[2] - world_positions[0];
                 let denom: f32 = uv1.x * uv2.y - uv1.y * uv2.x;
                 let tangent: Vec3 = if denom.abs() > 0.000001 {
                     let r: f32 = 1.0 / denom;
@@ -576,6 +580,10 @@ impl Rasterizer {
             let mut job = TiledJob { framebuffer_tile, render_tile, statistics: PerTileStatistics::default() };
             self.draw_tile(&mut job);
             self.stats.fragments_drawn += job.statistics.fragments_drawn;
+        }
+
+        if self.draw_wireframe {
+            self.draw_wireframe(framebuffer);
         }
     }
 
@@ -1310,6 +1318,23 @@ impl Rasterizer {
 
     pub fn set_debug_coloring(&mut self, debug_coloring: bool) {
         self.debug_coloring = debug_coloring;
+    }
+
+    pub fn set_draw_wireframe(&mut self, draw_wireframe: bool) {
+        self.draw_wireframe = draw_wireframe;
+    }
+
+    fn draw_wireframe(&mut self, framebuffer: &mut Framebuffer) {
+        let mut lines = Vec::<Vec2>::new();
+        for i in (0..self.vertices.len()).step_by(3) {
+            lines.push(Vec2::new(self.vertices[i + 0].position.x, self.vertices[i + 0].position.y));
+            lines.push(Vec2::new(self.vertices[i + 1].position.x, self.vertices[i + 1].position.y));
+            lines.push(Vec2::new(self.vertices[i + 1].position.x, self.vertices[i + 1].position.y));
+            lines.push(Vec2::new(self.vertices[i + 2].position.x, self.vertices[i + 2].position.y));
+            lines.push(Vec2::new(self.vertices[i + 2].position.x, self.vertices[i + 2].position.y));
+            lines.push(Vec2::new(self.vertices[i + 0].position.x, self.vertices[i + 0].position.y));
+        }
+        draw_screen_lines_unclipped(framebuffer, &lines, Vec4::new(1.0, 1.0, 1.0, 1.0));
     }
 }
 

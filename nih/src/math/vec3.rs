@@ -19,8 +19,9 @@ impl Vec3 {
     }
 
     pub fn normalized(self) -> Vec3 {
-        let len = self.length();
-        self / len
+        let len: f32 = (self.x * self.x + self.y * self.y + self.z * self.z).sqrt();
+        let rec: f32 = 1.0 / len;
+        return Vec3 { x: self.x * rec, y: self.y * rec, z: self.z * rec };
     }
 
     pub fn clamped(self, min: f32, max: f32) -> Vec3 {

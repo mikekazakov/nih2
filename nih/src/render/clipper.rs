@@ -62,7 +62,6 @@ fn interpolate_vertex(v0: &Vertex, v1: &Vertex, t: f32) -> Vertex {
     let t1 = 1.0 - t;
     Vertex {
         position: t1 * v0.position + t * v1.position,
-        world_position: t1 * v0.world_position + t * v1.world_position,
         normal: t1 * v0.normal + t * v1.normal,
         tangent: t1 * v0.tangent + t * v1.tangent,
         color: t1 * v0.color + t * v1.color,

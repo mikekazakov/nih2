@@ -18,8 +18,9 @@ impl Vec4 {
     }
 
     pub fn normalized(self) -> Vec4 {
-        let len = self.length();
-        self / len
+        let len: f32 = self.length();
+        let rec: f32 = 1.0 / len;
+        self * rec
     }
 
     pub fn clamped(self, min: f32, max: f32) -> Vec4 {
