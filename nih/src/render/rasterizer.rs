@@ -35,14 +35,14 @@ pub enum AlphaBlendingMode {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VerticesColorInterpolationMode {
-    // There's no color information given for the triangle, assume (255, 255, 255, 255)
+    // There's no color information given for the triangle, assume (255, 255, 255, 255).
     None = 0,
 
-    // later:
-    // Fixed per triangle
+    // Some uniform color is applied to all fragments of the triangle, and it's not (255, 255, 255, 255).
+    Fixed = 1,
 
     // Triangle contains different per-vertex colors that must be interpolated.
-    PerVertex = 1,
+    PerVertex = 2,
 }
 
 #[derive(Debug, Clone)]
@@ -400,11 +400,19 @@ impl Rasterizer {
                 }
             }
 
-            // Pessimize the color interpolation mode depending on the colors of this triangle
-            if color_interpolation_mode != VerticesColorInterpolationMode::PerVertex {
-                if (input_vertices[0].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length() > 0.01
-                    || (input_vertices[1].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length() > 0.01
-                    || (input_vertices[2].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length() > 0.01
+            // Check if we need to pessimize the color interpolation mode up to Fixed
+            if color_interpolation_mode == VerticesColorInterpolationMode::None {
+                if (input_vertices[0].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length_squared() > 0.01
+                    || (input_vertices[1].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length_squared() > 0.01
+                    || (input_vertices[2].color - Vec4::new(1.0, 1.0, 1.0, 1.0)).length_squared() > 0.01
+                {
+                    color_interpolation_mode = VerticesColorInterpolationMode::Fixed;
+                }
+            }
+            // Check if we need to pessimize the color interpolation mode up to Per-Vertex
+            if color_interpolation_mode == VerticesColorInterpolationMode::Fixed {
+                if (input_vertices[0].color - input_vertices[1].color).length_squared() > 0.01
+                    || (input_vertices[0].color - input_vertices[2].color).length_squared() > 0.01
                 {
                     color_interpolation_mode = VerticesColorInterpolationMode::PerVertex;
                 }
@@ -722,7 +730,7 @@ impl Rasterizer {
         idx += alpha_blending_mode as usize;
         idx *= 2; // two options for alpha test
         idx += alpha_test_enabled as usize;
-        idx *= 2; // two options for color interpolation
+        idx *= 3; // three options for color interpolation
         idx += color_interpolation_mode as usize;
         DRAW_TRIANGLE_FUNCTIONS[idx](self, framebuffer, local_viewport, vertices, command)
     }
@@ -1023,6 +1031,13 @@ impl Rasterizer {
             let inv_w_dx: f32 = dot(edge_dx_v3, inv_w_v3);
             let inv_w_dy: f32 = dot(edge_dy_v3, inv_w_v3);
 
+            // If fixed per-triangle color is used - prepare integer values.
+            // NB! The color is multiplied by 256 instead of 255 to use binary shift later.
+            let v0_color_r: u32 = (v0.color.x * 256.0) as u32;
+            let v0_color_g: u32 = (v0.color.y * 256.0) as u32;
+            let v0_color_b: u32 = (v0.color.z * 256.0) as u32;
+            let v0_color_a: u32 = (v0.color.w * 256.0) as u32;
+
             // Set up initial target pointers
             let mut color_row_ptr: *mut u32 = if HAS_COLOR_BUFFER {
                 unsafe {
@@ -1195,26 +1210,33 @@ impl Rasterizer {
                             }
 
                             // Color component of this fragment.
-                            // Either a mix of sampled and interpolated colors or a sampled color as-is.
+                            // Either a mix of sampled and triangle colors or a sampled color as-is.
                             let r: u8;
                             let g: u8;
                             let b: u8;
                             let a: u8;
 
                             if COLOR_INTERPOLATION_MODE == VerticesColorInterpolationMode::PerVertex as u8 {
+                                // If the triangle has different per-vertex colors - need to interpolate them.
                                 // Recover interpolated per-fragment color
                                 let interpolated_r: f32 = r_over_w * inv_inv_w;
                                 let interpolated_g: f32 = g_over_w * inv_inv_w;
                                 let interpolated_b: f32 = b_over_w * inv_inv_w;
                                 let interpolated_a: f32 = a_over_w * inv_inv_w;
-
                                 // Multiply the interpolated and texel colors
                                 r = (interpolated_r * tex_fragment.r as f32).clamp(0.0, 255.0) as u8;
                                 g = (interpolated_g * tex_fragment.g as f32).clamp(0.0, 255.0) as u8;
                                 b = (interpolated_b * tex_fragment.b as f32).clamp(0.0, 255.0) as u8;
                                 a = (interpolated_a * tex_fragment.a as f32).clamp(0.0, 255.0) as u8;
+                            } else if COLOR_INTERPOLATION_MODE == VerticesColorInterpolationMode::Fixed as u8 {
+                                // If the triangle has a fixed per-fragment color - multiply the sampled color by it.
+                                // Be stingy and do the multiplication in integers.
+                                r = ((v0_color_r * tex_fragment.r as u32) >> 8) as u8;
+                                g = ((v0_color_g * tex_fragment.g as u32) >> 8) as u8;
+                                b = ((v0_color_b * tex_fragment.b as u32) >> 8) as u8;
+                                a = ((v0_color_a * tex_fragment.a as u32) >> 8) as u8;
                             } else {
-                                // Use the sampled color as-is
+                                // Triangle has no color information - use the sampled color as-is
                                 r = tex_fragment.r;
                                 g = tex_fragment.g;
                                 b = tex_fragment.b;
@@ -1423,7 +1445,7 @@ fn panicking_draw_triangles(
     panic!("Dummy, should never be called");
 }
 
-const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 288;
+const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 576;
 const DRAW_TRIANGLE_FUNCTIONS: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] = {
     let mut functions: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] =
         [panicking_draw_triangles; DRAW_TRIANGLE_FUNCTIONS_NUM];
@@ -1437,6 +1459,7 @@ const DRAW_TRIANGLE_FUNCTIONS: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] = 
         ($t:expr, $i:expr, $a:expr, $b:expr, $c:expr, $d:expr, $e:expr, $f:expr) => {
             draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, $f, 0u8);
             draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, $f, 1u8);
+            draw_triangles_instantiate_function!($t, $i, $a, $b, $c, $d, $e, $f, 2u8);
         };
     }
     macro_rules! draw_triangles_per_alpha_test_enabled {

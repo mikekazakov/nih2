@@ -17,6 +17,10 @@ impl Vec4 {
         dot(self, self).sqrt()
     }
 
+    pub fn length_squared(self) -> f32 {
+        dot(self, self)
+    }
+
     pub fn normalized(self) -> Vec4 {
         let len: f32 = self.length();
         let rec: f32 = 1.0 / len;
