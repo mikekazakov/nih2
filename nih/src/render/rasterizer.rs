@@ -1445,7 +1445,7 @@ fn panicking_draw_triangles(
     panic!("Dummy, should never be called");
 }
 
-const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 576;
+const DRAW_TRIANGLE_FUNCTIONS_NUM: usize = 432;
 const DRAW_TRIANGLE_FUNCTIONS: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] = {
     let mut functions: [DrawTrianglesFn; DRAW_TRIANGLE_FUNCTIONS_NUM] =
         [panicking_draw_triangles; DRAW_TRIANGLE_FUNCTIONS_NUM];
