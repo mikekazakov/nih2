@@ -16,3 +16,7 @@ criterion = "0.7"
 [[bench]]
 name = "sampler"
 harness = false
+
+[[bench]]
+name = "rasterizer"
+harness = false
