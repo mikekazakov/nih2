@@ -13,8 +13,11 @@ impl HosekWilkieSky {
     // albedo: ground albedo/reflectance per channel, [0.0...1.0] x 3
     // elevation: angle between sun and horizon in radians, [0...Pi/2]
     pub fn new(turbidity: f32, albedo: Vec3, solar_elevation: f32) -> Self {
-        let x: f64 = (solar_elevation as f64 / (3.14 / 2.0)).powf(1.0 / 3.0);
-        let mut sky = Self { radiance: [0.0; 3], distribution: [[0.0; 9]; 3] };
+        let x: f64 = (solar_elevation as f64 / std::f64::consts::FRAC_PI_2).powf(1.0 / 3.0);
+        let mut sky = Self {
+            radiance: [0.0; 3],
+            distribution: [[0.0; 9]; 3],
+        };
         sky.radiance[0] = radiance(RADIANCE_PARAMETERS_1, turbidity as f64, albedo.x as f64, x);
         sky.radiance[1] = radiance(RADIANCE_PARAMETERS_2, turbidity as f64, albedo.y as f64, x);
         sky.radiance[2] = radiance(RADIANCE_PARAMETERS_3, turbidity as f64, albedo.z as f64, x);
@@ -27,13 +30,20 @@ impl HosekWilkieSky {
     /// theta - angle between the zenith and the view direction, radians.
     ///         defined only for theta: [0..Pi/2].
     /// gamma - angle between the sun and the view direction, radians.
-    pub fn f(&self, theta: f32, gamma: f32) -> Vec3 {
-        let chi = |g: f32, a: f32| -> f32 {
-            let num: f32 = 1.0 + a.cos().powi(2);
-            let denom: f32 = (1.0 + g.powi(2) - 2.0 * g * a.cos()).powf(3.0 / 2.0);
-            num / denom
+    /// theta_cos - theta.cos(). Usually already available, hence requested upfront instead of recalculating.
+    /// gamma_cos - gamma.cos(). Usually already available, hence requested upfront instead of recalculating.
+    pub fn f(&self,
+             theta: f32,
+             gamma: f32,
+             theta_cos: f32,
+             gamma_cos: f32) -> Vec3 {
+        debug_assert!(theta_cos >= 0.0 && theta_cos <= 1.0);
+        let chi = |g: f32| -> f32 {
+            let num: f32 = 1.0 + gamma_cos * gamma_cos;
+            let denom: f32 = 1.0 + g * g - 2.0 * g * gamma_cos;
+            num / (denom * denom.sqrt())
         };
-        let eval = |p: [f32; 9], theta: f32, gamma: f32| -> f32 {
+        let eval = |p: [f32; 9]| -> f32 {
             let a: f32 = p[0];
             let b: f32 = p[1];
             let c: f32 = p[2];
@@ -43,15 +53,15 @@ impl HosekWilkieSky {
             let g: f32 = p[6];
             let h: f32 = p[7];
             let i: f32 = p[8];
-            let term1: f32 = 1.0 + a * (b / (theta.cos() + 0.01)).exp();
+            let term1: f32 = 1.0 + a * (b / (theta_cos + 0.01)).exp();
             let term2: f32 =
-                c + d * (e * gamma).exp() + f * gamma.cos().powi(2) + g * chi(i, gamma) + h * theta.cos().sqrt();
+                c + d * (e * gamma).exp() + f * gamma_cos * gamma_cos + g * chi(i) + h * theta_cos.sqrt();
             term1 * term2
         };
-        let f0 = eval(self.distribution[0], theta, gamma);
-        let f1 = eval(self.distribution[1], theta, gamma);
-        let f2 = eval(self.distribution[2], theta, gamma);
-        let c = Vec3::new(f0 * self.radiance[0], f1 * self.radiance[1], f2 * self.radiance[2]);
+        let f0: f32 = eval(self.distribution[0]);
+        let f1: f32 = eval(self.distribution[1]);
+        let f2: f32 = eval(self.distribution[2]);
+        let c: Vec3 = Vec3::new(f0 * self.radiance[0], f1 * self.radiance[1], f2 * self.radiance[2]);
         c
     }
 }

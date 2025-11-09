@@ -86,10 +86,11 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
                 Face::ZPos => Vec3::new(-u, v, 1.0).normalized(),
             };
 
-            let theta: f32 = dir.y.acos(); // view angle from zenith
-            let cos_gamma = dot(dir, sun_dir);
-            let gamma: f32 = cos_gamma.acos(); // angle between view direction and sun
-            let mut f = sky.f(theta, gamma);
+            let theta_cos: f32 = dir.y;
+            let theta: f32 = theta_cos.acos(); // view angle from zenith
+            let gamma_cos: f32 = dot(dir, sun_dir);
+            let gamma: f32 = gamma_cos.acos(); // angle between view direction and sun
+            let mut f = sky.f(theta, gamma, theta_cos, gamma_cos);
 
             let sun_angular_radius = 0.01; // ~0.5 degrees
             if gamma < sun_angular_radius * 2.0 {
