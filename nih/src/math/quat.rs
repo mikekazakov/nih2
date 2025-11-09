@@ -67,6 +67,20 @@ impl Quat {
             Quat { x: self.x * inv_len, y: self.y * inv_len, z: self.z * inv_len, w: self.w * inv_len }
         }
     }
+
+    pub fn as_mat33(self) -> Mat33 {
+        Mat33([
+            1.0 - 2.0 * self.y * self.y - 2.0 * self.z * self.z,
+            2.0 * self.x * self.y - 2.0 * self.z * self.w,
+            2.0 * self.x * self.z + 2.0 * self.y * self.w,
+            2.0 * self.x * self.y + 2.0 * self.z * self.w,
+            1.0 - 2.0 * self.x * self.x - 2.0 * self.z * self.z,
+            2.0 * self.y * self.z - 2.0 * self.x * self.w,
+            2.0 * self.x * self.z - 2.0 * self.y * self.w,
+            2.0 * self.y * self.z + 2.0 * self.x * self.w,
+            1.0 - 2.0 * self.x * self.x - 2.0 * self.y * self.y,
+        ])
+    }
 }
 
 impl std::ops::Mul for Quat {

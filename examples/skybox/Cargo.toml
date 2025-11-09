@@ -1,0 +1,14 @@
+[package]
+name = "skybox"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+sdl3 = { version = "0.15", features = [] }
+nih = { path = "../../nih" }
+image = "0.25"
+rand = "0.10.0-rc.0"
+noise = { version = "0.9.0", features = ["images"] }
+
+[build-dependencies]
+pkg-config = "0.3"
