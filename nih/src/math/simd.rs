@@ -138,3 +138,267 @@ impl U32x4 {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct F32x4 {
+    #[cfg(target_arch = "x86_64")]
+    inner: core::arch::x86_64::__m128,
+
+    #[cfg(target_arch = "aarch64")]
+    inner: core::arch::aarch64::float32x4_t,
+}
+
+impl F32x4 {
+    /// Construct from array
+    #[inline(always)]
+    pub fn load(values: [f32; 4]) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_loadu_ps(values.as_ptr() as *const __m128) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vld1q_f32(values.as_ptr()) }
+            }
+        }
+    }
+
+    /// Store back into array
+    #[inline(always)]
+    pub fn store(self) -> [f32; 4] {
+        let mut out = [0f32; 4];
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                _mm_storeu_ps(out.as_mut_ptr() as *mut __m128, self.inner);
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                vst1q_f32(out.as_mut_ptr(), self.inner);
+            }
+        }
+        out
+    }
+
+    /// Construct from a single value broadcasted to 4 lanes
+    #[inline(always)]
+    pub fn broadcast(value: f32) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_set1_ps(value) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vdupq_n_f32(value) }
+            }
+        }
+    }
+
+    /// Add two vectors
+    #[inline(always)]
+    pub fn add(self, other: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_add_ps(self.inner, other.inner) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vaddq_f32(self.inner, other.inner) }
+            }
+        }
+    }
+
+    /// Subtracts two vectors
+    #[inline(always)]
+    pub fn sub(self, other: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_sub_ps(self.inner, other.inner) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vsubq_f32(self.inner, other.inner) }
+            }
+        }
+    }
+
+    /// Multiplies two vectors
+    #[inline(always)]
+    pub fn mul(self, other: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_mul_ps(self.inner, other.inner) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vmulq_f32(self.inner, other.inner) }
+            }
+        }
+    }
+
+    /// Divides two vectors
+    #[inline(always)]
+    pub fn div(self, other: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_div_ps(self.inner, other.inner) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vdivq_f32(self.inner, other.inner) }
+            }
+        }
+    }
+
+    /// Calculates square root
+    #[inline(always)]
+    pub fn sqrt(self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_sqrt_ps(self.inner) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vsqrtq_f32(self.inner) }
+            }
+        }
+    }
+
+
+    /// Calculates an exponent function
+    #[inline(always)]
+    pub fn exp(self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            // dummy for now
+            let mut v: [f32; 4] = self.store();
+            v[0] = v[0].exp();
+            v[1] = v[1].exp();
+            v[2] = v[2].exp();
+            v[3] = v[3].exp();
+            Self::load(v)
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            Self { inner: vexpq_neon_f32(self.inner) }
+        }
+    }
+}
+
+
+// https://github.com/ARM-software/EndpointAI/blob/master/Kernels/Migrating_to_Helium_from_Neon_Companion_SW/vmath.c
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+#[allow(non_snake_case)]
+fn vtaylor_polyq_f32(x: core::arch::aarch64::float32x4_t, coeffs: &[f32; 32]) -> core::arch::aarch64::float32x4_t {
+    unsafe {
+        use core::arch::aarch64::*;
+        let coeffs: *const f32 = coeffs.as_ptr();
+        let A: float32x4_t = vmlaq_f32(vld1q_f32(coeffs.add(4 * 0)), vld1q_f32(coeffs.add(4 * 4)), x);
+        let B: float32x4_t = vmlaq_f32(vld1q_f32(coeffs.add(4 * 2)), vld1q_f32(coeffs.add(4 * 6)), x);
+        let C: float32x4_t = vmlaq_f32(vld1q_f32(coeffs.add(4 * 1)), vld1q_f32(coeffs.add(4 * 5)), x);
+        let D: float32x4_t = vmlaq_f32(vld1q_f32(coeffs.add(4 * 3)), vld1q_f32(coeffs.add(4 * 7)), x);
+        let x2: float32x4_t = vmulq_f32(x, x);
+        let x4: float32x4_t = vmulq_f32(x2, x2);
+        let res: float32x4_t = vmlaq_f32(vmlaq_f32(A, B, x2), vmlaq_f32(C, D, x2), x4);
+        res
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+#[allow(non_snake_case)]
+fn vexpq_neon_f32(x: core::arch::aarch64::float32x4_t) -> core::arch::aarch64::float32x4_t {
+    unsafe {
+        use core::arch::aarch64::*;
+        // Perform range reduction [-log(2),log(2)]
+        let m: int32x4_t = vcvtq_s32_f32(vmulq_f32(x, vdupq_n_f32(std::f32::consts::LOG2_E)));
+        let val: float32x4_t = vmlsq_f32(x, vcvtq_f32_s32(m), vdupq_n_f32(std::f32::consts::LN_2));
+        // Polynomial Approximation
+        let mut poly: float32x4_t = vtaylor_polyq_f32(val, &EXP_TAB);
+        // Reconstruct
+        poly = vreinterpretq_f32_s32(vqaddq_s32(vreinterpretq_s32_f32(poly), vqshlq_n_s32(m, 23)));
+        poly = vbslq_f32(vcltq_s32(m, vdupq_n_s32(-126)), vdupq_n_f32(0.0), poly);
+        poly
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+static EXP_TAB: [f32; 32] = [
+    1.0, 1.0, 1.0, 1.0,
+    0.0416598916054, 0.0416598916054, 0.0416598916054, 0.0416598916054,
+    0.500000596046, 0.500000596046, 0.500000596046, 0.500000596046,
+    0.0014122662833, 0.0014122662833, 0.0014122662833, 0.0014122662833,
+    1.00000011921, 1.00000011921, 1.00000011921, 1.00000011921,
+    0.00833693705499, 0.00833693705499, 0.00833693705499, 0.00833693705499,
+    0.166665703058, 0.166665703058, 0.166665703058, 0.166665703058,
+    0.000195780929062, 0.000195780929062, 0.000195780929062, 0.000195780929062
+];
+
+// F32x4 + F32x4
+impl std::ops::Add for F32x4 {
+    type Output = F32x4;
+    #[inline(always)]
+    fn add(self, other: F32x4) -> F32x4 {
+        self.add(other)
+    }
+}
+
+// F32x4 - F32x4
+impl std::ops::Sub for F32x4 {
+    type Output = F32x4;
+    #[inline(always)]
+    fn sub(self, other: F32x4) -> F32x4 {
+        self.sub(other)
+    }
+}
+
+// F32x4 * F32x4
+impl std::ops::Mul for F32x4 {
+    type Output = F32x4;
+    #[inline(always)]
+    fn mul(self, other: F32x4) -> F32x4 {
+        self.mul(other)
+    }
+}
+
+// F32x4 / F32x4
+impl std::ops::Div for F32x4 {
+    type Output = F32x4;
+    #[inline(always)]
+    fn div(self, other: F32x4) -> F32x4 {
+        self.div(other)
+    }
+}

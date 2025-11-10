@@ -1,9 +1,13 @@
 // An Analytic Model for Full Spectral Sky-Dome Radiance
 // https://cgg.mff.cuni.cz/publications/an-analytic-model-for-full-spectral-sky-dome-radiance/
 
+use nih::math::simd::F32x4;
 use nih::math::*;
 
+#[repr(align(16))]
 pub struct HosekWilkieSky {
+    radiance4: [f32; 4],
+    distribution4: [[f32; 4]; 9],
     radiance: [f32; 3],
     distribution: [[f32; 9]; 3],
 }
@@ -15,6 +19,8 @@ impl HosekWilkieSky {
     pub fn new(turbidity: f32, albedo: Vec3, solar_elevation: f32) -> Self {
         let x: f64 = (solar_elevation as f64 / std::f64::consts::FRAC_PI_2).powf(1.0 / 3.0);
         let mut sky = Self {
+            radiance4: [0.0; 4],
+            distribution4: [[0.0; 4]; 9],
             radiance: [0.0; 3],
             distribution: [[0.0; 9]; 3],
         };
@@ -24,6 +30,10 @@ impl HosekWilkieSky {
         sky.distribution[0] = distribution(DISTRIBUTION_PARAMETERS_1, turbidity as f64, albedo.x as f64, x);
         sky.distribution[1] = distribution(DISTRIBUTION_PARAMETERS_2, turbidity as f64, albedo.y as f64, x);
         sky.distribution[2] = distribution(DISTRIBUTION_PARAMETERS_3, turbidity as f64, albedo.z as f64, x);
+        sky.radiance4 = [sky.radiance[0], sky.radiance[1], sky.radiance[2], 0.0];
+        for i in 0..9 {
+            sky.distribution4[i] = [sky.distribution[0][i], sky.distribution[1][i], sky.distribution[2][i], 0.0];
+        }
         sky
     }
 
@@ -38,32 +48,65 @@ impl HosekWilkieSky {
              theta_cos: f32,
              gamma_cos: f32) -> Vec3 {
         debug_assert!(theta_cos >= 0.0 && theta_cos <= 1.0);
-        let chi = |g: f32| -> f32 {
-            let num: f32 = 1.0 + gamma_cos * gamma_cos;
-            let denom: f32 = 1.0 + g * g - 2.0 * g * gamma_cos;
-            num / (denom * denom.sqrt())
-        };
-        let eval = |p: [f32; 9]| -> f32 {
-            let a: f32 = p[0];
-            let b: f32 = p[1];
-            let c: f32 = p[2];
-            let d: f32 = p[3];
-            let e: f32 = p[4];
-            let f: f32 = p[5];
-            let g: f32 = p[6];
-            let h: f32 = p[7];
-            let i: f32 = p[8];
-            let term1: f32 = 1.0 + a * (b / (theta_cos + 0.01)).exp();
-            let term2: f32 =
-                c + d * (e * gamma).exp() + f * gamma_cos * gamma_cos + g * chi(i) + h * theta_cos.sqrt();
-            term1 * term2
-        };
-        let f0: f32 = eval(self.distribution[0]);
-        let f1: f32 = eval(self.distribution[1]);
-        let f2: f32 = eval(self.distribution[2]);
-        let c: Vec3 = Vec3::new(f0 * self.radiance[0], f1 * self.radiance[1], f2 * self.radiance[2]);
-        c
+        let a: F32x4 = F32x4::load(self.distribution4[0]);
+        let b: F32x4 = F32x4::load(self.distribution4[1]);
+        let c: F32x4 = F32x4::load(self.distribution4[2]);
+        let d: F32x4 = F32x4::load(self.distribution4[3]);
+        let e: F32x4 = F32x4::load(self.distribution4[4]);
+        let f: F32x4 = F32x4::load(self.distribution4[5]);
+        let g: F32x4 = F32x4::load(self.distribution4[6]);
+        let h: F32x4 = F32x4::load(self.distribution4[7]);
+        let i: F32x4 = F32x4::load(self.distribution4[8]);
+        let one: F32x4 = F32x4::broadcast(1.0);
+        let two: F32x4 = F32x4::broadcast(2.0);
+        let zero_zero_one: F32x4 = F32x4::broadcast(0.01);
+        let gamma: F32x4 = F32x4::broadcast(gamma);
+        let theta_cos: F32x4 = F32x4::broadcast(theta_cos);
+        let gamma_cos: F32x4 = F32x4::broadcast(gamma_cos);
+        let radiance: F32x4 = F32x4::load(self.radiance4);
+        let term1: F32x4 = (b / (theta_cos + zero_zero_one)).exp() * a + one;
+        let chi_num: F32x4 = one + gamma_cos * gamma_cos;
+        let chi_denom: F32x4 = one + i * (i - gamma_cos * two);
+        let chi: F32x4 = chi_num / (chi_denom * chi_denom.sqrt());
+        let term2: F32x4 = c + d * (e * gamma).exp() + f * gamma_cos * gamma_cos + g * chi + h * theta_cos.sqrt();
+        let c: F32x4 = (term1 * term2) * radiance;
+        let c4: [f32; 4] = c.store();
+        Vec3::new(c4[0], c4[1], c4[2])
     }
+
+    // +/- Reference implementation based on the paper and the original C implementation
+    // pub fn f(&self,
+    //          theta: f32,
+    //          gamma: f32,
+    //          theta_cos: f32,
+    //          gamma_cos: f32) -> Vec3 {
+    //     debug_assert!(theta_cos >= 0.0 && theta_cos <= 1.0);
+    //     let chi = |g: f32| -> f32 {
+    //         let num: f32 = 1.0 + gamma_cos * gamma_cos;
+    //         let denom: f32 = 1.0 + g * g - 2.0 * g * gamma_cos;
+    //         num / (denom * denom.sqrt())
+    //     };
+    //     let eval = |p: [f32; 9]| -> f32 {
+    //         let a: f32 = p[0];
+    //         let b: f32 = p[1];
+    //         let c: f32 = p[2];
+    //         let d: f32 = p[3];
+    //         let e: f32 = p[4];
+    //         let f: f32 = p[5];
+    //         let g: f32 = p[6];
+    //         let h: f32 = p[7];
+    //         let i: f32 = p[8];
+    //         let term1: f32 = 1.0 + a * (b / (theta_cos + 0.01)).exp();
+    //         let term2: f32 =
+    //             c + d * (e * gamma).exp() + f * gamma_cos * gamma_cos + g * chi(i) + h * theta_cos.sqrt();
+    //         term1 * term2
+    //     };
+    //     let f0: f32 = eval(self.distribution[0]);
+    //     let f1: f32 = eval(self.distribution[1]);
+    //     let f2: f32 = eval(self.distribution[2]);
+    //     let c: Vec3 = Vec3::new(f0 * self.radiance[0], f1 * self.radiance[1], f2 * self.radiance[2]);
+    //     c
+    // }
 }
 
 fn sample(p: [f64; 6], x: f64) -> f64 {
