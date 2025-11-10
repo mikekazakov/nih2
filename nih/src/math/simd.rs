@@ -175,7 +175,7 @@ impl F32x4 {
             #[cfg(target_arch = "x86_64")]
             {
                 use core::arch::x86_64::*;
-                _mm_storeu_ps(out.as_mut_ptr() as *mut __m128, self.inner);
+                _mm_storeu_ps(out.as_mut_ptr(), self.inner);
             }
 
             #[cfg(target_arch = "aarch64")]
