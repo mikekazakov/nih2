@@ -44,24 +44,28 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         Vec3 { x: encode(c.x), y: encode(c.y), z: encode(c.z) }
     }
 
-    fn tonemap_reinhard(rgb: Vec3, exposure: f32, white: Option<f32>) -> Vec3 {
+    fn to_srgb2(c: Vec3) -> Vec3 {
+        Vec3::new(
+            ((-0.28450663 * c.x + 1.2580714) * c.x - 0.0024727747).sqrt(),
+            ((-0.28450663 * c.y + 1.2580714) * c.y - 0.0024727747).sqrt(),
+            ((-0.28450663 * c.z + 1.2580714) * c.z - 0.0024727747).sqrt(),
+        )
+    }
+
+    fn tonemap_reinhard(rgb: Vec3, exposure: f32, white_point: f32) -> Vec3 {
         let r = rgb.x * exposure;
         let g = rgb.y * exposure;
         let b = rgb.z * exposure;
         let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        let yd = match white {
-            None => y / (1.0 + y),
-            Some(w) => {
-                (y * (1.0 + y / (w * w))) / (1.0 + y) // white point version
-            }
-        };
+        let yd = (y * (1.0 + y / (white_point * white_point))) / (1.0 + y);
         let s = if y > 0.0 { yd / y } else { 1.0 };
         Vec3::new(r * s, g * s, b * s)
     }
 
     fn linear_to_rgb(c: Vec3) -> Vec3 {
         let exposure: f32 = 1.0;
-        let exposed: Vec3 = tonemap_reinhard(c, exposure, Some(10.0));
+        let exposed: Vec3 = tonemap_reinhard(c, exposure, 12.0);
+        // exposed
         let display: Vec3 = to_srgb(exposed);
         display
     }
@@ -87,19 +91,19 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
             };
 
             let theta_cos: f32 = dir.y;
-            let theta: f32 = theta_cos.acos(); // view angle from zenith
             let gamma_cos: f32 = dot(dir, sun_dir);
             let gamma: f32 = gamma_cos.acos(); // angle between view direction and sun
-            let mut f = sky.f(theta, gamma, theta_cos, gamma_cos);
+            let mut f = sky.f(gamma, theta_cos, gamma_cos);
 
-            let sun_angular_radius = 0.01; // ~0.5 degrees
-            if gamma < sun_angular_radius * 2.0 {
-                let sun_intensity = 3.0; // multiplier at Sun center
-                let falloff = (-(gamma * gamma) / (2.0 * sun_angular_radius * sun_angular_radius)).exp();
+            let sun_angular_radius = 0.025; // ~0.5 degrees
+            let sun_intensity = 5.0; // multiplier at Sun center
+            if gamma < sun_angular_radius {
+                let falloff: f32 = (1.618 - 1.0 / (1.618 - gamma / sun_angular_radius)).max(0.0);
                 f = f + f * sun_intensity * falloff;
             }
 
             let c = linear_to_rgb(f);
+            // let c = f * 0.1;
 
             texels[idx * 3 + 0] = (c.x * 255.0).clamp(0.0, 255.0) as u8;
             texels[idx * 3 + 1] = (c.y * 255.0).clamp(0.0, 255.0) as u8;
@@ -121,7 +125,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let video_subsystem = sdl_context.video()?;
     let window = video_subsystem
         .window(
-            "Grass Example | Space - pause, W - draw wireframe, Esc - close",
+            "Skybox Example | Space - pause, W - draw wireframe, R/F - turbidity, T/G - albedo.r, Y/H - albedo.g, U/J - albedo.b, Esc - close",
             1280,
             720,
         )
@@ -205,6 +209,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last = std::time::Instant::now();
     let mut t = 0.0;
     let mut dt: f32 = 0.0;
+    let mut sky_turbidity: f32 = 2.5;
+    let mut ground_albedo: Vec3 = Vec3::new(0.3, 0.0, 1.0);
     let mut rebuild_skybox: bool = true;
     let mut camera_orientation: Quat = Quat::from_axis_angle(Vec3::new(0.0, 0.0, -1.0), 0.0);
     let camera_position: Vec3 = Vec3::new(0.0, 2.0, 35.0);
@@ -218,6 +224,41 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => return Ok(()),
                 Event::KeyDown { keycode: Some(Keycode::Space), .. } => paused = !paused,
                 Event::KeyDown { keycode: Some(Keycode::W), .. } => show_wireframe = !show_wireframe,
+                Event::KeyDown { keycode: Some(Keycode::R), .. } => {
+                    sky_turbidity = (sky_turbidity + 0.5).min(10.0);
+                    println!("turbidity: {}", sky_turbidity);
+                    rebuild_skybox = true;
+                }
+                Event::KeyDown { keycode: Some(Keycode::F), .. } => {
+                    sky_turbidity = (sky_turbidity - 0.5).max(1.0);
+                    println!("turbidity: {}", sky_turbidity);
+                    rebuild_skybox = true;
+                }
+                Event::KeyDown { keycode: Some(Keycode::T), .. } | Event::KeyDown { keycode: Some(Keycode::G), .. } | Event::KeyDown { keycode: Some(Keycode::Y), .. }
+                | Event::KeyDown { keycode: Some(Keycode::H), .. } | Event::KeyDown { keycode: Some(Keycode::U), .. } | Event::KeyDown { keycode: Some(Keycode::J), .. }
+                => {
+                    if let Event::KeyDown { keycode: Some(Keycode::T), .. } = event {
+                        ground_albedo.x += 0.1;
+                    }
+                    if let Event::KeyDown { keycode: Some(Keycode::G), .. } = event {
+                        ground_albedo.x -= 0.1;
+                    }
+                    if let Event::KeyDown { keycode: Some(Keycode::Y), .. } = event {
+                        ground_albedo.y += 0.1;
+                    }
+                    if let Event::KeyDown { keycode: Some(Keycode::H), .. } = event {
+                        ground_albedo.y -= 0.1;
+                    }
+                    if let Event::KeyDown { keycode: Some(Keycode::U), .. } = event {
+                        ground_albedo.z += 0.1;
+                    }
+                    if let Event::KeyDown { keycode: Some(Keycode::J), .. } = event {
+                        ground_albedo.z -= 0.1;
+                    }
+                    ground_albedo = ground_albedo.clamped(0.0, 1.0);
+                    println!("ground albedo: {:.1}, {:.1}, {:.1}", ground_albedo.x, ground_albedo.y, ground_albedo.z);
+                    rebuild_skybox = true;
+                }
                 Event::MouseMotion { xrel, yrel, mousestate, .. } => {
                     if mousestate.left() {
                         let sensitivity: f32 = 0.002;
@@ -243,11 +284,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if rebuild_skybox {
             let sun_dir: Vec3 = Vec3::new(0.0, (t * 0.1).sin(), -(t * 0.1).cos()).normalized();
-            let turbidity: f32 = 2.5; // daylight sky
             let theta_sun: f32 = sun_dir.y.acos(); // angle from zenith, radians
             let sun_elevation: f32 = (3.14 / 2.0 - theta_sun).max(0.0); // angle from the horizon, radians
-            let ground_albedo: Vec3 = Vec3::new(0.0, 0.0, 1.0);
-            let sky: HosekWilkieSky = HosekWilkieSky::new(turbidity, ground_albedo, sun_elevation);
+            let sky: HosekWilkieSky = HosekWilkieSky::new(sky_turbidity, ground_albedo, sun_elevation);
             neg_x_tex = build_face(&sky, Face::XNeg, sun_dir);
             pos_x_tex = build_face(&sky, Face::XPos, sun_dir);
             pos_y_tex = build_face(&sky, Face::YPos, sun_dir);

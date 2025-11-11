@@ -43,7 +43,6 @@ impl HosekWilkieSky {
     /// theta_cos - theta.cos(). Usually already available, hence requested upfront instead of recalculating.
     /// gamma_cos - gamma.cos(). Usually already available, hence requested upfront instead of recalculating.
     pub fn f(&self,
-             theta: f32,
              gamma: f32,
              theta_cos: f32,
              gamma_cos: f32) -> Vec3 {
