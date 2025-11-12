@@ -76,9 +76,16 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
     let mut texels: Vec<u8> = Vec::<u8>::new();
     texels.resize(width * height * 3, 127);
     let height_max = if face == Face::YPos { height } else { height / 2 };
+
+    let mut theta_cos_row: Vec<f32> = vec![0.0; width];
+    let mut gamma_cos_row: Vec<f32> = vec![0.0; width];
+    let mut gamma_row: Vec<f32> = vec![0.0; width];
+    let mut r_row: Vec<f32> = vec![0.0; width];
+    let mut g_row: Vec<f32> = vec![0.0; width];
+    let mut b_row: Vec<f32> = vec![0.0; width];
+
     for y in 0..height_max {
         for x in 0..width {
-            let idx = (y * width + x) as usize;
             let u: f32 = 2.0 * (x as f32 + 0.5) / (width as f32) - 1.0; // [-1, 1
             let v: f32 = 2.0 * ((height - 1 - y) as f32 + 0.5) / (height as f32) - 1.0; // [-1, 1]
             let dir: Vec3 = match face {
@@ -93,7 +100,17 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
             let theta_cos: f32 = dir.y;
             let gamma_cos: f32 = dot(dir, sun_dir);
             let gamma: f32 = gamma_cos.acos(); // angle between view direction and sun
-            let mut f = sky.f(gamma, theta_cos, gamma_cos);
+            theta_cos_row[x] = theta_cos;
+            gamma_cos_row[x] = gamma_cos;
+            gamma_row[x] = gamma;
+        }
+        sky.f_simd_r(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut r_row);
+        sky.f_simd_g(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut g_row);
+        sky.f_simd_b(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut b_row);
+
+        for x in 0..width {
+            let gamma: f32 = gamma_row[x];
+            let mut f: Vec3 = Vec3::new(r_row[x], g_row[x], b_row[x]);
 
             let sun_angular_radius = 0.025; // ~0.5 degrees
             let sun_intensity = 5.0; // multiplier at Sun center
@@ -105,6 +122,7 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
             let c = linear_to_rgb(f);
             // let c = f * 0.1;
 
+            let idx = (y * width + x) as usize;
             texels[idx * 3 + 0] = (c.x * 255.0).clamp(0.0, 255.0) as u8;
             texels[idx * 3 + 1] = (c.y * 255.0).clamp(0.0, 255.0) as u8;
             texels[idx * 3 + 2] = (c.z * 255.0).clamp(0.0, 255.0) as u8;

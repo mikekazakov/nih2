@@ -187,6 +187,24 @@ impl F32x4 {
         out
     }
 
+    /// Store back into array
+    #[inline(always)]
+    pub fn store_to(self, out: &mut [f32; 4]) {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                _mm_storeu_ps(out.as_mut_ptr(), self.inner);
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                vst1q_f32(out.as_mut_ptr(), self.inner);
+            }
+        }
+    }
+
     /// Construct from a single value broadcasted to 4 lanes
     #[inline(always)]
     pub fn broadcast(value: f32) -> Self {

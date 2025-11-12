@@ -6,8 +6,8 @@ use nih::math::*;
 
 #[repr(align(16))]
 pub struct HosekWilkieSky {
-    radiance4: [f32; 4],
-    distribution4: [[f32; 4]; 9],
+    radiance_rgbx: [f32; 4],
+    distribution_rgbx: [[f32; 4]; 9],
     radiance: [f32; 3],
     distribution: [[f32; 9]; 3],
 }
@@ -19,8 +19,8 @@ impl HosekWilkieSky {
     pub fn new(turbidity: f32, albedo: Vec3, solar_elevation: f32) -> Self {
         let x: f64 = (solar_elevation as f64 / std::f64::consts::FRAC_PI_2).powf(1.0 / 3.0);
         let mut sky = Self {
-            radiance4: [0.0; 4],
-            distribution4: [[0.0; 4]; 9],
+            radiance_rgbx: [0.0; 4],
+            distribution_rgbx: [[0.0; 4]; 9],
             radiance: [0.0; 3],
             distribution: [[0.0; 9]; 3],
         };
@@ -30,9 +30,9 @@ impl HosekWilkieSky {
         sky.distribution[0] = distribution(DISTRIBUTION_PARAMETERS_1, turbidity as f64, albedo.x as f64, x);
         sky.distribution[1] = distribution(DISTRIBUTION_PARAMETERS_2, turbidity as f64, albedo.y as f64, x);
         sky.distribution[2] = distribution(DISTRIBUTION_PARAMETERS_3, turbidity as f64, albedo.z as f64, x);
-        sky.radiance4 = [sky.radiance[0], sky.radiance[1], sky.radiance[2], 0.0];
+        sky.radiance_rgbx = [sky.radiance[0], sky.radiance[1], sky.radiance[2], 0.0];
         for i in 0..9 {
-            sky.distribution4[i] = [sky.distribution[0][i], sky.distribution[1][i], sky.distribution[2][i], 0.0];
+            sky.distribution_rgbx[i] = [sky.distribution[0][i], sky.distribution[1][i], sky.distribution[2][i], 0.0];
         }
         sky
     }
@@ -47,22 +47,22 @@ impl HosekWilkieSky {
              theta_cos: f32,
              gamma_cos: f32) -> Vec3 {
         debug_assert!(theta_cos >= 0.0 && theta_cos <= 1.0);
-        let a: F32x4 = F32x4::load(self.distribution4[0]);
-        let b: F32x4 = F32x4::load(self.distribution4[1]);
-        let c: F32x4 = F32x4::load(self.distribution4[2]);
-        let d: F32x4 = F32x4::load(self.distribution4[3]);
-        let e: F32x4 = F32x4::load(self.distribution4[4]);
-        let f: F32x4 = F32x4::load(self.distribution4[5]);
-        let g: F32x4 = F32x4::load(self.distribution4[6]);
-        let h: F32x4 = F32x4::load(self.distribution4[7]);
-        let i: F32x4 = F32x4::load(self.distribution4[8]);
+        let a: F32x4 = F32x4::load(self.distribution_rgbx[0]);
+        let b: F32x4 = F32x4::load(self.distribution_rgbx[1]);
+        let c: F32x4 = F32x4::load(self.distribution_rgbx[2]);
+        let d: F32x4 = F32x4::load(self.distribution_rgbx[3]);
+        let e: F32x4 = F32x4::load(self.distribution_rgbx[4]);
+        let f: F32x4 = F32x4::load(self.distribution_rgbx[5]);
+        let g: F32x4 = F32x4::load(self.distribution_rgbx[6]);
+        let h: F32x4 = F32x4::load(self.distribution_rgbx[7]);
+        let i: F32x4 = F32x4::load(self.distribution_rgbx[8]);
         let one: F32x4 = F32x4::broadcast(1.0);
         let two: F32x4 = F32x4::broadcast(2.0);
         let zero_zero_one: F32x4 = F32x4::broadcast(0.01);
         let gamma: F32x4 = F32x4::broadcast(gamma);
         let theta_cos: F32x4 = F32x4::broadcast(theta_cos);
         let gamma_cos: F32x4 = F32x4::broadcast(gamma_cos);
-        let radiance: F32x4 = F32x4::load(self.radiance4);
+        let radiance: F32x4 = F32x4::load(self.radiance_rgbx);
         let term1: F32x4 = (b / (theta_cos + zero_zero_one)).exp() * a + one;
         let chi_num: F32x4 = one + gamma_cos * gamma_cos;
         let chi_denom: F32x4 = one + i * (i - gamma_cos * two);
@@ -71,6 +71,77 @@ impl HosekWilkieSky {
         let c: F32x4 = (term1 * term2) * radiance;
         let c4: [f32; 4] = c.store();
         Vec3::new(c4[0], c4[1], c4[2])
+    }
+
+    fn f_simd_channel<const CHANNEL: usize>(&self,
+                                            gamma: &[f32],
+                                            theta_cos: &[f32],
+                                            gamma_cos: &[f32],
+                                            output: &mut [f32],
+    ) {
+        assert!(CHANNEL >= 0 && CHANNEL <= 2);
+        assert!(gamma.len() == theta_cos.len() && gamma.len() == gamma_cos.len() && gamma.len() == output.len());
+        assert!(gamma.len() % 4 == 0);
+        let len: usize = output.len();
+        if len < 4 {
+            return;
+        }
+        let gamma: *const f32 = gamma.as_ptr();
+        let theta_cos: *const f32 = theta_cos.as_ptr();
+        let gamma_cos: *const f32 = gamma_cos.as_ptr();
+        let output: *mut f32 = output.as_mut_ptr();
+        let a: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][0]);
+        let b: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][1]);
+        let c: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][2]);
+        let d: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][3]);
+        let e: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][4]);
+        let f: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][5]);
+        let g: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][6]);
+        let h: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][7]);
+        let i: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][8]);
+        let one: F32x4 = F32x4::broadcast(1.0);
+        let two: F32x4 = F32x4::broadcast(2.0);
+        let zero_zero_one: F32x4 = F32x4::broadcast(0.01);
+        let radiance: F32x4 = F32x4::broadcast(self.radiance[CHANNEL]);
+        for idx in (0..=len - 4).step_by(4) {
+            let gamma: F32x4 = F32x4::load(unsafe { *(gamma.add(idx) as *const [f32; 4]) });
+            let theta_cos: F32x4 = F32x4::load(unsafe { *(theta_cos.add(idx) as *const [f32; 4]) });
+            let gamma_cos: F32x4 = F32x4::load(unsafe { *(gamma_cos.add(idx) as *const [f32; 4]) });
+            let term1: F32x4 = (b / (theta_cos + zero_zero_one)).exp() * a + one;
+            let chi_num: F32x4 = one + gamma_cos * gamma_cos;
+            let chi_denom: F32x4 = one + i * (i - gamma_cos * two);
+            let chi: F32x4 = chi_num / (chi_denom * chi_denom.sqrt());
+            let term2: F32x4 = c + d * (e * gamma).exp() + f * gamma_cos * gamma_cos + g * chi + h * theta_cos.sqrt();
+            let c: F32x4 = (term1 * term2) * radiance;
+            c.store_to(unsafe { &mut *(output.add(idx) as *mut [f32; 4]) });
+        }
+    }
+
+    pub fn f_simd_r(&self,
+                    gamma: &[f32],
+                    theta_cos: &[f32],
+                    gamma_cos: &[f32],
+                    output: &mut [f32],
+    ) {
+        self.f_simd_channel::<0>(gamma, theta_cos, gamma_cos, output);
+    }
+
+    pub fn f_simd_g(&self,
+                    gamma: &[f32],
+                    theta_cos: &[f32],
+                    gamma_cos: &[f32],
+                    output: &mut [f32],
+    ) {
+        self.f_simd_channel::<1>(gamma, theta_cos, gamma_cos, output);
+    }
+
+    pub fn f_simd_b(&self,
+                    gamma: &[f32],
+                    theta_cos: &[f32],
+                    gamma_cos: &[f32],
+                    output: &mut [f32],
+    ) {
+        self.f_simd_channel::<2>(gamma, theta_cos, gamma_cos, output);
     }
 
     // +/- Reference implementation based on the paper and the original C implementation
