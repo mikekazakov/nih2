@@ -84,25 +84,42 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
     let mut g_row: Vec<f32> = vec![0.0; width];
     let mut b_row: Vec<f32> = vec![0.0; width];
 
+    // TODO: not actually precisely -1.0/+1.0?..
+    let mut dir_row: Vec3 = match face {
+        Face::XNeg => Vec3::new(-1.0, 1.0, 1.0),
+        Face::XPos => Vec3::new(1.0, 1.0, -1.0),
+        Face::YNeg => Vec3::new(1.0, -1.0, -1.0),
+        Face::YPos => Vec3::new(-1.0, 1.0, 1.0),
+        Face::ZNeg => Vec3::new(-1.0, 1.0, -1.0),
+        Face::ZPos => Vec3::new(1.0, 1.0, 1.0),
+    };
+    let dir_dy: Vec3 = match face {
+        Face::XNeg => Vec3::new(0.0, -2.0 / (height as f32), 0.0),
+        Face::XPos => Vec3::new(0.0, -2.0 / (height as f32), 0.0),
+        Face::YNeg => Vec3::new(0.0, 0.0, 2.0 / (height as f32)),
+        Face::YPos => Vec3::new(0.0, 0.0, -2.0 / (height as f32)),
+        Face::ZNeg => Vec3::new(0.0, -2.0 / (height as f32), 0.0),
+        Face::ZPos => Vec3::new(0.0, -2.0 / (height as f32), 0.0),
+    };
+    let dir_dx: Vec3 = match face {
+        Face::XNeg => Vec3::new(0.0, 0.0, -2.0 / (width as f32)),
+        Face::XPos => Vec3::new(0.0, 0.0, 2.0 / (width as f32)),
+        Face::YNeg => Vec3::new(-2.0 / (width as f32), 0.0, 0.0),
+        Face::YPos => Vec3::new(2.0 / (width as f32), 0.0, 0.0),
+        Face::ZNeg => Vec3::new(2.0 / (width as f32), 0.0, 0.0),
+        Face::ZPos => Vec3::new(-2.0 / (width as f32), 0.0, 0.0),
+    };
     for y in 0..height_max {
+        let mut dir_col: Vec3 = dir_row;
         for x in 0..width {
-            let u: f32 = 2.0 * (x as f32 + 0.5) / (width as f32) - 1.0; // [-1, 1
-            let v: f32 = 2.0 * ((height - 1 - y) as f32 + 0.5) / (height as f32) - 1.0; // [-1, 1]
-            let dir: Vec3 = match face {
-                Face::XNeg => Vec3::new(-1.0, v, -u).normalized(),
-                Face::XPos => Vec3::new(1.0, v, u).normalized(),
-                Face::YNeg => Vec3::new(-u, -1.0, v).normalized(),
-                Face::YPos => Vec3::new(u, 1.0, v).normalized(),
-                Face::ZNeg => Vec3::new(u, v, -1.0).normalized(),
-                Face::ZPos => Vec3::new(-u, v, 1.0).normalized(),
-            };
-
+            let dir: Vec3 = dir_col.normalized();
             let theta_cos: f32 = dir.y;
-            let gamma_cos: f32 = dot(dir, sun_dir);
+            let gamma_cos: f32 = dot(dir, sun_dir).clamp(-1.0, 1.0);
             let gamma: f32 = gamma_cos.acos(); // angle between view direction and sun
             theta_cos_row[x] = theta_cos;
             gamma_cos_row[x] = gamma_cos;
             gamma_row[x] = gamma;
+            dir_col += dir_dx;
         }
         sky.f_simd_r(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut r_row);
         sky.f_simd_g(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut g_row);
@@ -127,6 +144,7 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
             texels[idx * 3 + 1] = (c.y * 255.0).clamp(0.0, 255.0) as u8;
             texels[idx * 3 + 2] = (c.z * 255.0).clamp(0.0, 255.0) as u8;
         }
+        dir_row += dir_dy;
     }
 
     Texture::new(&TextureSource {
