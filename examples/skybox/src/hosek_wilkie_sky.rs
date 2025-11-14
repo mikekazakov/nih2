@@ -79,17 +79,17 @@ impl HosekWilkieSky {
                                             gamma_cos: &[f32],
                                             output: &mut [f32],
     ) {
-        assert!(CHANNEL >= 0 && CHANNEL <= 2);
+        assert!(CHANNEL <= 2);
         assert!(gamma.len() == theta_cos.len() && gamma.len() == gamma_cos.len() && gamma.len() == output.len());
-        assert!(gamma.len() % 4 == 0);
+        assert_eq!(gamma.len() % 4, 0);
         let len: usize = output.len();
         if len < 4 {
             return;
         }
-        let gamma: *const f32 = gamma.as_ptr();
-        let theta_cos: *const f32 = theta_cos.as_ptr();
-        let gamma_cos: *const f32 = gamma_cos.as_ptr();
-        let output: *mut f32 = output.as_mut_ptr();
+        let mut gamma_ptr: *const f32 = gamma.as_ptr();
+        let mut theta_cos_ptr: *const f32 = theta_cos.as_ptr();
+        let mut gamma_cos_ptr: *const f32 = gamma_cos.as_ptr();
+        let mut output_ptr: *mut f32 = output.as_mut_ptr();
         let a: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][0]);
         let b: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][1]);
         let c: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][2]);
@@ -100,20 +100,25 @@ impl HosekWilkieSky {
         let h: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][7]);
         let i: F32x4 = F32x4::broadcast(self.distribution[CHANNEL][8]);
         let one: F32x4 = F32x4::broadcast(1.0);
-        let two: F32x4 = F32x4::broadcast(2.0);
+        let minus_two: F32x4 = F32x4::broadcast(-2.0);
         let zero_zero_one: F32x4 = F32x4::broadcast(0.01);
         let radiance: F32x4 = F32x4::broadcast(self.radiance[CHANNEL]);
-        for idx in (0..=len - 4).step_by(4) {
-            let gamma: F32x4 = F32x4::load(unsafe { *(gamma.add(idx) as *const [f32; 4]) });
-            let theta_cos: F32x4 = F32x4::load(unsafe { *(theta_cos.add(idx) as *const [f32; 4]) });
-            let gamma_cos: F32x4 = F32x4::load(unsafe { *(gamma_cos.add(idx) as *const [f32; 4]) });
-            let term1: F32x4 = (b / (theta_cos + zero_zero_one)).exp() * a + one;
-            let chi_num: F32x4 = one + gamma_cos * gamma_cos;
-            let chi_denom: F32x4 = one + i * (i - gamma_cos * two);
+        let steps: usize = len / 4;
+        for _idx in 0..steps {
+            let gamma: F32x4 = F32x4::load(unsafe { *(gamma_ptr as *const [f32; 4]) });
+            let theta_cos: F32x4 = F32x4::load(unsafe { *(theta_cos_ptr as *const [f32; 4]) });
+            let gamma_cos: F32x4 = F32x4::load(unsafe { *(gamma_cos_ptr as *const [f32; 4]) });
+            let term1: F32x4 = (b / (theta_cos + zero_zero_one)).exp().fma(a, one);
+            let chi_num: F32x4 = gamma_cos.fma(gamma_cos, one);
+            let chi_denom: F32x4 = gamma_cos.fma(minus_two, i).fma(i, one);
             let chi: F32x4 = chi_num / (chi_denom * chi_denom.sqrt());
-            let term2: F32x4 = c + d * (e * gamma).exp() + f * gamma_cos * gamma_cos + g * chi + h * theta_cos.sqrt();
-            let c: F32x4 = (term1 * term2) * radiance;
-            c.store_to(unsafe { &mut *(output.add(idx) as *mut [f32; 4]) });
+            let term2: F32x4 = theta_cos.sqrt().fma(h, (f * gamma_cos).fma(gamma_cos, g.fma(chi, (e * gamma).exp().fma(d, c))));
+            let channel_radiance: F32x4 = (term1 * term2) * radiance;
+            channel_radiance.store_to(unsafe { &mut *(output_ptr as *mut [f32; 4]) });
+            gamma_ptr = unsafe { gamma_ptr.add(4) };
+            theta_cos_ptr = unsafe { theta_cos_ptr.add(4) };
+            gamma_cos_ptr = unsafe { gamma_cos_ptr.add(4) };
+            output_ptr = unsafe { output_ptr.add(4) };
         }
     }
 

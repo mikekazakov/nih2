@@ -295,6 +295,24 @@ impl F32x4 {
         }
     }
 
+    /// Calculates x * a + b
+    #[inline(always)]
+    pub fn fma(self, a: Self, b: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_fmadd_ps(self.inner, a.inner, b.inner) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vfmaq_f32(b.inner, self.inner, a.inner) }
+            }
+        }
+    }
+
     /// Calculates square root
     #[inline(always)]
     pub fn sqrt(self) -> Self {
