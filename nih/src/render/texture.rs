@@ -97,7 +97,7 @@ impl Texture {
 
             for y in 0..dst_mip.height as usize {
                 for x in 0..dst_mip.width as usize {
-                    let mut sum = vec![0u32; bpp];
+                    let mut sum = [0u32; 4]; // max bpp is 4
                     for dy in 0..2 {
                         for dx in 0..2 {
                             let src_x = x * 2 + dx;
