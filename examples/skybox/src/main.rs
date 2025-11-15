@@ -1,6 +1,7 @@
 mod hosek_wilkie_sky;
 
 use crate::hosek_wilkie_sky::HosekWilkieSky;
+use nih::math::simd::F32x4;
 use nih::math::*;
 use nih::render::*;
 use noise::{NoiseFn, Seedable};
@@ -84,6 +85,7 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
     let mut g_row: Vec<f32> = vec![0.0; width];
     let mut b_row: Vec<f32> = vec![0.0; width];
 
+    // Set up the initial direction vector for y=0/x=0, depending on the face.
     // TODO: not actually precisely -1.0/+1.0?..
     let mut dir_row: Vec3 = match face {
         Face::XNeg => Vec3::new(-1.0, 1.0, 1.0),
@@ -93,6 +95,7 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         Face::ZNeg => Vec3::new(-1.0, 1.0, -1.0),
         Face::ZPos => Vec3::new(1.0, 1.0, 1.0),
     };
+    // Set up the direction increment for each row.
     let dir_dy: Vec3 = match face {
         Face::XNeg => Vec3::new(0.0, -2.0 / (height as f32), 0.0),
         Face::XPos => Vec3::new(0.0, -2.0 / (height as f32), 0.0),
@@ -101,6 +104,7 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         Face::ZNeg => Vec3::new(0.0, -2.0 / (height as f32), 0.0),
         Face::ZPos => Vec3::new(0.0, -2.0 / (height as f32), 0.0),
     };
+    // Set up the direction increment for each column.
     let dir_dx: Vec3 = match face {
         Face::XNeg => Vec3::new(0.0, 0.0, -2.0 / (width as f32)),
         Face::XPos => Vec3::new(0.0, 0.0, 2.0 / (width as f32)),
@@ -109,18 +113,45 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         Face::ZNeg => Vec3::new(2.0 / (width as f32), 0.0, 0.0),
         Face::ZPos => Vec3::new(-2.0 / (width as f32), 0.0, 0.0),
     };
+    let dir_dx_x_4: F32x4 = F32x4::splat(dir_dx.x) * F32x4::splat(4.0);
+    let dir_dx_y_4: F32x4 = F32x4::splat(dir_dx.y) * F32x4::splat(4.0);
+    let dir_dx_z_4: F32x4 = F32x4::splat(dir_dx.z) * F32x4::splat(4.0);
+    let dir_offset_x_4: F32x4 = F32x4::load([dir_dx.x, dir_dx.x * 2.0, dir_dx.x * 3.0, dir_dx.x * 4.0]);
+    let dir_offset_y_4: F32x4 = F32x4::load([dir_dx.y, dir_dx.y * 2.0, dir_dx.y * 3.0, dir_dx.y * 4.0]);
+    let dir_offset_z_4: F32x4 = F32x4::load([dir_dx.z, dir_dx.z * 2.0, dir_dx.z * 3.0, dir_dx.z * 4.0]);
+    let sun_dir_x_4: F32x4 = F32x4::splat(sun_dir.x);
+    let sun_dir_y_4: F32x4 = F32x4::splat(sun_dir.y);
+    let sun_dir_z_4: F32x4 = F32x4::splat(sun_dir.z);
     for y in 0..height_max {
-        let mut dir_col: Vec3 = dir_row;
-        for x in 0..width {
-            let dir: Vec3 = dir_col.normalized();
-            let theta_cos: f32 = dir.y;
-            let gamma_cos: f32 = dot(dir, sun_dir).clamp(-1.0, 1.0);
-            let gamma: f32 = gamma_cos.acos(); // angle between view direction and sun
-            theta_cos_row[x] = theta_cos;
-            gamma_cos_row[x] = gamma_cos;
-            gamma_row[x] = gamma;
-            dir_col += dir_dx;
+        // Calculate gamma, theta_cos, gamma_cos for each texel in the row.
+        let mut vec_x_4: F32x4 = F32x4::splat(dir_row.x) + dir_offset_x_4;
+        let mut vec_y_4: F32x4 = F32x4::splat(dir_row.y) + dir_offset_y_4;
+        let mut vec_z_4: F32x4 = F32x4::splat(dir_row.z) + dir_offset_z_4;
+        for x in (0..width).step_by(4) {
+            // normalize the components of the direction vector
+            let vec_len: F32x4 = (vec_x_4 * vec_x_4 + vec_y_4 * vec_y_4 + vec_z_4 * vec_z_4).sqrt();
+            let normalized_vec_x_4: F32x4 = vec_x_4 / vec_len;
+            let normalized_vec_y_4: F32x4 = vec_y_4 / vec_len;
+            let normalized_vec_z_4: F32x4 = vec_z_4 / vec_len;
+            // cos(theta) - cos(angle between the zenith and the view direction)
+            let theta_cos_4: F32x4 = normalized_vec_y_4;
+            // gamma_cos = dot(dir, sun_dir).clamp(-1.0, 1.0);
+            let gamma_cos_4: F32x4 = (normalized_vec_x_4 * sun_dir_x_4 +
+                normalized_vec_y_4 * sun_dir_y_4 +
+                normalized_vec_z_4 * sun_dir_z_4).min(F32x4::splat(1.0)).max(F32x4::splat(-1.0));
+            // gamma - angle between the view direction and the Sun
+            let gamma_4: F32x4 = gamma_cos_4.acos();
+            theta_cos_4.store_to(unsafe { &mut *(theta_cos_row.as_mut_ptr().add(x) as *mut [f32; 4]) });
+            gamma_cos_4.store_to(unsafe { &mut *(gamma_cos_row.as_mut_ptr().add(x) as *mut [f32; 4]) });
+            gamma_4.store_to(unsafe { &mut *(gamma_row.as_mut_ptr().add(x) as *mut [f32; 4]) });
+            // step the direction vector forward by 4 texels
+            // wasteful - de-facto only 1 of the 3 dx regs is non-zero
+            vec_x_4 += dir_dx_x_4;
+            vec_y_4 += dir_dx_y_4;
+            vec_z_4 += dir_dx_z_4;
         }
+
+        // Calculate per-channel radiance values for each texel in the row.
         sky.f_simd_r(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut r_row);
         sky.f_simd_g(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut g_row);
         sky.f_simd_b(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut b_row);
@@ -129,7 +160,7 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
             let gamma: f32 = gamma_row[x];
             let mut f: Vec3 = Vec3::new(r_row[x], g_row[x], b_row[x]);
 
-            let sun_angular_radius = 0.025; // ~0.5 degrees
+            let sun_angular_radius = 0.03; // ~0.5 degrees
             let sun_intensity = 5.0; // multiplier at Sun center
             if gamma < sun_angular_radius {
                 let falloff: f32 = (1.618 - 1.0 / (1.618 - gamma / sun_angular_radius)).max(0.0);

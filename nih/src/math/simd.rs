@@ -207,7 +207,7 @@ impl F32x4 {
 
     /// Construct from a single value broadcasted to 4 lanes
     #[inline(always)]
-    pub fn broadcast(value: f32) -> Self {
+    pub fn splat(value: f32) -> Self {
         unsafe {
             #[cfg(target_arch = "x86_64")]
             {
@@ -351,6 +351,109 @@ impl F32x4 {
             Self { inner: vexpq_neon_f32(self.inner) }
         }
     }
+
+    // Calculates arccosine of x: [-1,1]
+    // https://developer.download.nvidia.com/cg/acos.html
+    #[inline(always)]
+    pub fn acos(self) -> Self {
+        let zero: F32x4 = Self::splat(0.0);
+        let one: F32x4 = Self::splat(1.0);
+        let negate: F32x4 = self.cmp_lt(zero).select(one, zero);
+        let x: F32x4 = self.abs();
+        let mut ret: F32x4 = Self::splat(-0.0187293);
+        ret = ret.fma(x, Self::splat(0.0742610));
+        ret = ret.fma(x, Self::splat(-0.2121144));
+        ret = ret.fma(x, Self::splat(1.5707288));
+        ret = ret * (one - x).sqrt();
+        ret = ret * negate.fma(Self::splat(-2.0), one);
+        negate.fma(Self::splat(std::f32::consts::PI), ret)
+    }
+
+    #[inline(always)]
+    pub fn abs(self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_and_ps(self.inner, _mm_castsi128_ps(_mm_set1_epi32(0x7FFF_FFFF))) }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vabsq_f32(self.inner) }
+            }
+        }
+    }
+
+    /// Compares less than for each lane.
+    #[inline(always)]
+    pub fn cmp_lt(self, other: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_cmplt_ps(self.inner, other.inner) }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vreinterpretq_f32_u32(vcltq_f32(self.inner, other.inner)) }
+            }
+        }
+    }
+
+    /// Select per-bit values from two vectors based on a mask.
+    /// If the bit is 1, a value from the first vector is picked.
+    /// e.g. select() => if { first } else { second }
+    #[inline(always)]
+    pub fn select(self, one: Self, zero: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                return Self { inner: _mm_blendv_ps(zero.inner, one.inner, self.inner) };
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vbslq_f32(vreinterpretq_u32_f32(self.inner), one.inner, zero.inner) }
+            }
+        }
+    }
+
+    /// Min
+    #[inline(always)]
+    pub fn min(self, other: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                return Self { inner: _mm_min_ps(sef.inner, other.inner) };
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vminq_f32(self.inner, other.inner) }
+            }
+        }
+    }
+
+    /// Max
+    #[inline(always)]
+    pub fn max(self, other: Self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                return Self { inner: _mm_max_ps(sef.inner, other.inner) };
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                Self { inner: vmaxq_f32(self.inner, other.inner) }
+            }
+        }
+    }
 }
 
 
@@ -436,5 +539,13 @@ impl std::ops::Div for F32x4 {
     #[inline(always)]
     fn div(self, other: F32x4) -> F32x4 {
         self.div(other)
+    }
+}
+
+// F32x4 += F32x4
+impl std::ops::AddAssign for F32x4 {
+    #[inline(always)]
+    fn add_assign(&mut self, other: F32x4) {
+        *self = self.add(other);
     }
 }
