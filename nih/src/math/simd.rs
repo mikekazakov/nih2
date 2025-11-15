@@ -428,7 +428,7 @@ impl F32x4 {
             #[cfg(target_arch = "x86_64")]
             {
                 use core::arch::x86_64::*;
-                return Self { inner: _mm_min_ps(sef.inner, other.inner) };
+                return Self { inner: _mm_min_ps(self.inner, other.inner) };
             }
             #[cfg(target_arch = "aarch64")]
             {
@@ -445,7 +445,7 @@ impl F32x4 {
             #[cfg(target_arch = "x86_64")]
             {
                 use core::arch::x86_64::*;
-                return Self { inner: _mm_max_ps(sef.inner, other.inner) };
+                return Self { inner: _mm_max_ps(self.inner, other.inner) };
             }
             #[cfg(target_arch = "aarch64")]
             {
