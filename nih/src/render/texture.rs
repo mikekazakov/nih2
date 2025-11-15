@@ -41,12 +41,22 @@ pub struct Texture {
 impl Texture {
     pub fn new(source: &TextureSource) -> Arc<Self> {
         let bpp = bytes_per_pixel(source.format);
+        match bpp {
+            1 => Self::new_impl::<1>(source),
+            2 => Self::new_impl::<2>(source),
+            3 => Self::new_impl::<3>(source),
+            4 => Self::new_impl::<4>(source),
+            _ => unreachable!(),
+        }
+    }
+
+    fn new_impl<const BPP: usize>(source: &TextureSource) -> Arc<Self> {
         assert!(source.height > 0);
         assert!(source.width > 0);
         assert!(source.height.is_power_of_two());
         assert!(source.width.is_power_of_two());
         assert_eq!(source.height, source.width);
-        assert_eq!(source.texels.len(), source.height as usize * source.width as usize * bpp);
+        assert_eq!(source.texels.len(), source.height as usize * source.width as usize * BPP);
 
         // Compute mip count
         let mut dim = source.width;
@@ -61,7 +71,7 @@ impl Texture {
         let mut mips: [Mip; MAX_MIP_LEVELS] = Default::default();
         dim = source.width;
         for level in 0..mip_count {
-            let mip_size = ((dim * dim) as usize * bpp + 3) & !3;
+            let mip_size = ((dim * dim) as usize * BPP + 3) & !3;
             mips[level] = Mip { width: dim as u16, height: dim as u16, offset: total_size as u32 };
             total_size += mip_size;
             dim >>= 1;
@@ -85,16 +95,20 @@ impl Texture {
 
         // Generate mip levels
         for level in 1..mip_count {
-            let src_mip = mips[level - 1];
-            let src = texel_data[src_mip.offset as usize
-                ..src_mip.offset as usize + src_mip.width as usize * src_mip.height as usize * bpp]
-                .to_vec();
+            let src_mip: Mip = mips[level - 1];
+            let dst_mip: Mip = mips[level];
 
-            let dst_mip = &mut mips[level];
+            // Split the entire buffer into two parts to keep the borrow checker happy
+            let (texel_data_before, texel_data_after): (&mut [u8], &mut [u8]) = texel_data.split_at_mut(dst_mip.offset as usize);
 
-            let dst = &mut texel_data[dst_mip.offset as usize
-                ..dst_mip.offset as usize + dst_mip.width as usize * dst_mip.height as usize * bpp];
+            // Texels to copy from
+            let src: &[u8] = &texel_data_before[src_mip.offset as usize
+                ..src_mip.offset as usize + src_mip.width as usize * src_mip.height as usize * BPP];
 
+            // Texels to write to
+            let dst: &mut [u8] = &mut texel_data_after[0..dst_mip.width as usize * dst_mip.height as usize * BPP];
+
+            let src_stride = src_mip.width as usize * BPP;
             for y in 0..dst_mip.height as usize {
                 for x in 0..dst_mip.width as usize {
                     let mut sum = [0u32; 4]; // max bpp is 4
@@ -102,15 +116,15 @@ impl Texture {
                         for dx in 0..2 {
                             let src_x = x * 2 + dx;
                             let src_y = y * 2 + dy;
-                            let p_offset = (src_y * src_mip.width as usize + src_x) * bpp;
-                            for i in 0..bpp {
+                            let p_offset = src_y * src_stride + src_x * BPP;
+                            for i in 0..BPP {
                                 sum[i] += src[p_offset + i] as u32;
                             }
                         }
                     }
 
-                    let dst_offset = (y * dst_mip.width as usize + x) * bpp;
-                    for i in 0..bpp {
+                    let dst_offset = (y * dst_mip.width as usize + x) * BPP;
+                    for i in 0..BPP {
                         dst[dst_offset + i] = ((sum[i] + 2) / 4) as u8;
                     }
                 }
