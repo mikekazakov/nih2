@@ -110,22 +110,23 @@ impl Texture {
 
             let src_stride = src_mip.width as usize * BPP;
             for y in 0..dst_mip.height as usize {
-                for x in 0..dst_mip.width as usize {
-                    let mut sum = [0u32; 4]; // max bpp is 4
-                    for dy in 0..2 {
-                        for dx in 0..2 {
-                            let src_x = x * 2 + dx;
-                            let src_y = y * 2 + dy;
-                            let p_offset = src_y * src_stride + src_x * BPP;
-                            for i in 0..BPP {
-                                sum[i] += src[p_offset + i] as u32;
-                            }
-                        }
-                    }
-
-                    let dst_offset = (y * dst_mip.width as usize + x) * BPP;
+                let src_row1: *const u8 = unsafe { src.as_ptr().add(src_stride * y * 2) };
+                let src_row2: *const u8 = unsafe { src.as_ptr().add(src_stride * (y * 2 + 1)) };
+                let dst_row: *mut u8 = unsafe { dst.as_mut_ptr().add(dst_mip.width as usize * BPP * y) };
+                for idx in 0..dst_mip.width as usize {
                     for i in 0..BPP {
-                        dst[dst_offset + i] = ((sum[i] + 2) / 4) as u8;
+                        let sum: u32 = 2u32 +
+                            unsafe { *src_row1.add(idx * 2 * BPP + i) } as u32 +
+                            unsafe { *src_row1.add(((idx * 2) + 1) * BPP + i) } as u32 +
+                            unsafe { *src_row2.add(idx * 2 * BPP + i) } as u32 +
+                            unsafe { *src_row2.add(((idx * 2) + 1) * BPP + i) } as u32;
+
+                        // let mut sum: u32 = 2u32;
+                        // sum += unsafe { *src_row1.add(idx * 2 * BPP + i) } as u32;
+                        // sum += unsafe { *src_row1.add(((idx * 2) + 1) * BPP + i) } as u32;
+                        // sum += unsafe { *src_row2.add(idx * 2 * BPP + i) } as u32;
+                        // sum += unsafe { *src_row2.add(((idx * 2) + 1) * BPP + i) } as u32;
+                        unsafe { *dst_row.add(idx * BPP + i) = (sum / 4) as u8 };
                     }
                 }
             }
