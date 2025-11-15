@@ -120,12 +120,6 @@ impl Texture {
                             unsafe { *src_row1.add(((idx * 2) + 1) * BPP + i) } as u32 +
                             unsafe { *src_row2.add(idx * 2 * BPP + i) } as u32 +
                             unsafe { *src_row2.add(((idx * 2) + 1) * BPP + i) } as u32;
-
-                        // let mut sum: u32 = 2u32;
-                        // sum += unsafe { *src_row1.add(idx * 2 * BPP + i) } as u32;
-                        // sum += unsafe { *src_row1.add(((idx * 2) + 1) * BPP + i) } as u32;
-                        // sum += unsafe { *src_row2.add(idx * 2 * BPP + i) } as u32;
-                        // sum += unsafe { *src_row2.add(((idx * 2) + 1) * BPP + i) } as u32;
                         unsafe { *dst_row.add(idx * BPP + i) = (sum / 4) as u8 };
                     }
                 }
