@@ -223,6 +223,24 @@ impl F32x4 {
         }
     }
 
+    /// Convert to a 32-bit integer vector.
+    #[inline(always)]
+    pub fn to_u32(self) -> U32x4 {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                U32x4 { inner: _mm_cvttps_epi32(self.inner) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                U32x4 { inner: vcvtq_u32_f32(self.inner) }
+            }
+        }
+    }
+
     /// Add two vectors
     #[inline(always)]
     pub fn add(self, other: Self) -> Self {
@@ -349,6 +367,26 @@ impl F32x4 {
         #[cfg(target_arch = "aarch64")]
         {
             Self { inner: vexpq_neon_f32(self.inner) }
+        }
+    }
+
+    /// Calculates a natural logarithm function
+    #[inline(always)]
+    pub fn log(self) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            // dummy for now
+            let mut v: [f32; 4] = self.store();
+            v[0] = v[0].ln();
+            v[1] = v[1].ln();
+            v[2] = v[2].ln();
+            v[3] = v[3].ln();
+            Self::load(v)
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            Self { inner: vlogq_neon_f32(self.inner) }
         }
     }
 
@@ -495,6 +533,23 @@ fn vexpq_neon_f32(x: core::arch::aarch64::float32x4_t) -> core::arch::aarch64::f
 }
 
 #[cfg(target_arch = "aarch64")]
+#[inline(always)]
+#[allow(non_snake_case)]
+fn vlogq_neon_f32(x: core::arch::aarch64::float32x4_t) -> core::arch::aarch64::float32x4_t {
+    unsafe {
+        use core::arch::aarch64::*;
+        // Extract exponent
+        let m: int32x4_t = vsubq_s32(vreinterpretq_s32_u32(vshrq_n_u32(vreinterpretq_u32_f32(x), 23)), vdupq_n_s32(127));
+        let val: float32x4_t = vreinterpretq_f32_s32(vsubq_s32(vreinterpretq_s32_f32(x), vshlq_n_s32(m, 23)));
+        // Polynomial Approximation
+        let mut poly: float32x4_t = vtaylor_polyq_f32(val, &LOG_TAB);
+        // Reconstruct
+        poly = vmlaq_f32(poly, vcvtq_f32_s32(m), vdupq_n_f32(std::f32::consts::LN_2));
+        poly
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
 static EXP_TAB: [f32; 32] = [
     1.0, 1.0, 1.0, 1.0,
     0.0416598916054, 0.0416598916054, 0.0416598916054, 0.0416598916054,
@@ -504,6 +559,18 @@ static EXP_TAB: [f32; 32] = [
     0.00833693705499, 0.00833693705499, 0.00833693705499, 0.00833693705499,
     0.166665703058, 0.166665703058, 0.166665703058, 0.166665703058,
     0.000195780929062, 0.000195780929062, 0.000195780929062, 0.000195780929062
+];
+
+#[cfg(target_arch = "aarch64")]
+static LOG_TAB: [f32; 32] = [
+    -2.29561495781, -2.29561495781, -2.29561495781, -2.29561495781,
+    -2.47071170807, -2.47071170807, -2.47071170807, -2.47071170807,
+    -5.68692588806, -5.68692588806, -5.68692588806, -5.68692588806,
+    -0.165253549814, -0.165253549814, -0.165253549814, -0.165253549814,
+    5.17591238022, 5.17591238022, 5.17591238022, 5.17591238022,
+    0.844007015228, 0.844007015228, 0.844007015228, 0.844007015228,
+    4.58445882797, 4.58445882797, 4.58445882797, 4.58445882797,
+    0.0141278216615, 0.0141278216615, 0.0141278216615, 0.0141278216615
 ];
 
 // F32x4 + F32x4

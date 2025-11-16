@@ -1,6 +1,8 @@
 mod hosek_wilkie_sky;
+mod reinhard_tone_mapper;
 
 use crate::hosek_wilkie_sky::HosekWilkieSky;
+use crate::reinhard_tone_mapper::ReinhardToneMapper;
 use nih::math::simd::F32x4;
 use nih::math::*;
 use nih::render::*;
@@ -34,45 +36,9 @@ fn camera_to_mat34(orientation: Quat, position: Vec3) -> Mat34 {
 }
 
 fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
-    fn to_srgb(c: Vec3) -> Vec3 {
-        let encode = |x: f32| {
-            if x <= 0.0031308 {
-                12.92 * x
-            } else {
-                1.055 * x.powf(1.0 / 2.4) - 0.055
-            }
-        };
-        Vec3 { x: encode(c.x), y: encode(c.y), z: encode(c.z) }
-    }
-
-    fn to_srgb2(c: Vec3) -> Vec3 {
-        Vec3::new(
-            ((-0.28450663 * c.x + 1.2580714) * c.x - 0.0024727747).sqrt(),
-            ((-0.28450663 * c.y + 1.2580714) * c.y - 0.0024727747).sqrt(),
-            ((-0.28450663 * c.z + 1.2580714) * c.z - 0.0024727747).sqrt(),
-        )
-    }
-
-    fn tonemap_reinhard(rgb: Vec3, exposure: f32, white_point: f32) -> Vec3 {
-        let r = rgb.x * exposure;
-        let g = rgb.y * exposure;
-        let b = rgb.z * exposure;
-        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        let yd = (y * (1.0 + y / (white_point * white_point))) / (1.0 + y);
-        let s = if y > 0.0 { yd / y } else { 1.0 };
-        Vec3::new(r * s, g * s, b * s)
-    }
-
-    fn linear_to_rgb(c: Vec3) -> Vec3 {
-        let exposure: f32 = 1.0;
-        let exposed: Vec3 = tonemap_reinhard(c, exposure, 12.0);
-        // exposed
-        let display: Vec3 = to_srgb(exposed);
-        display
-    }
-
     let width = 512;
     let height = 512;
+    let tone_mapper = ReinhardToneMapper::new(0.5, 14.0, 2.2);
 
     let mut texels: Vec<u8> = Vec::<u8>::new();
     texels.resize(width * height * 3, 127);
@@ -156,25 +122,23 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         sky.f_simd_g(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut g_row);
         sky.f_simd_b(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut b_row);
 
+        // Inject 'the Sun' into the sky.
         for x in 0..width {
             let gamma: f32 = gamma_row[x];
-            let mut f: Vec3 = Vec3::new(r_row[x], g_row[x], b_row[x]);
-
             let sun_angular_radius = 0.03; // ~0.5 degrees
             let sun_intensity = 5.0; // multiplier at Sun center
             if gamma < sun_angular_radius {
                 let falloff: f32 = (1.618 - 1.0 / (1.618 - gamma / sun_angular_radius)).max(0.0);
-                f = f + f * sun_intensity * falloff;
+                r_row[x] += r_row[x] * sun_intensity * falloff;
+                g_row[x] += g_row[x] * sun_intensity * falloff;
+                b_row[x] += b_row[x] * sun_intensity * falloff;
             }
-
-            let c = linear_to_rgb(f);
-            // let c = f * 0.1;
-
-            let idx = (y * width + x) as usize;
-            texels[idx * 3 + 0] = (c.x * 255.0).clamp(0.0, 255.0) as u8;
-            texels[idx * 3 + 1] = (c.y * 255.0).clamp(0.0, 255.0) as u8;
-            texels[idx * 3 + 2] = (c.z * 255.0).clamp(0.0, 255.0) as u8;
         }
+
+        // Map the radiance values to RGB colors and store them in the texture.
+        tone_mapper.map(&r_row, &g_row, &b_row, texels[y * width * 3..y * width * 3 + width * 3].as_mut());
+
+        // Step the direction vector forward by 1 row
         dir_row += dir_dy;
     }
 
@@ -186,7 +150,20 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
     })
 }
 
+fn test_hosek_wilkie_sky() {
+    // The reference outputs were copied from the results of running the code from the original paper.
+    let sky1: HosekWilkieSky = HosekWilkieSky::new(2.0, Vec3::new(0.0, 0.0, 0.0), std::f32::consts::FRAC_PI_4);
+    assert!((sky1.f(0.0, std::f32::consts::FRAC_PI_4.cos(), 0.0f32.cos()) - Vec3::new(8.663214, 11.592292, 16.004868)).length() < 0.01);
+    assert!((sky1.f(0.1, std::f32::consts::FRAC_PI_4.cos(), 0.1f32.cos()) - Vec3::new(7.697937, 10.479785, 15.563609)).length() < 0.01);
+    assert!((sky1.f(0.1, 0.6f32.cos(), 0.1f32.cos()) - Vec3::new(6.292841, 8.564651, 13.267812)).length() < 0.01);
+    let sky2: HosekWilkieSky = HosekWilkieSky::new(3.0, Vec3::new(0.6, 0.2, 0.9), 1.0);
+    assert!((sky2.f(0.1, 0.6f32.cos(), 0.1f32.cos()) - Vec3::new(15.872860, 17.629661, 26.922695)).length() < 0.01);
+}
+
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Sanity check first of all
+    test_hosek_wilkie_sky();
+
     // Init SDL and Window
     let sdl_context = sdl3::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -276,8 +253,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last = std::time::Instant::now();
     let mut t = 0.0;
     let mut dt: f32 = 0.0;
-    let mut sky_turbidity: f32 = 2.5;
-    let mut ground_albedo: Vec3 = Vec3::new(0.3, 0.0, 1.0);
+    let mut sky_turbidity: f32 = 3.0;
+    let mut ground_albedo: Vec3 = Vec3::new(0.0, 0.0, 0.5);
     let mut rebuild_skybox: bool = true;
     let mut camera_orientation: Quat = Quat::from_axis_angle(Vec3::new(0.0, 0.0, -1.0), 0.0);
     let camera_position: Vec3 = Vec3::new(0.0, 2.0, 35.0);
