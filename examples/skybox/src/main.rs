@@ -38,7 +38,7 @@ fn camera_to_mat34(orientation: Quat, position: Vec3) -> Mat34 {
 fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
     let width = 512;
     let height = 512;
-    let tone_mapper = ReinhardToneMapper::new(0.5, 14.0, 2.2);
+    let tone_mapper = ReinhardToneMapper::new(0.5, 14.0);
 
     let mut texels: Vec<u8> = Vec::<u8>::new();
     texels.resize(width * height * 3, 127);

@@ -6,18 +6,16 @@ pub struct ReinhardToneMapper {
     luma_weights_b: F32x4,
     inv_white_point2: F32x4,
     exposure: F32x4,
-    inv_gamma: F32x4,
 }
 
 impl ReinhardToneMapper {
-    pub fn new(exposure: f32, white_point: f32, gamma: f32) -> Self {
+    pub fn new(exposure: f32, white_point: f32) -> Self {
         Self {
             luma_weights_r: F32x4::splat(0.2126),
             luma_weights_g: F32x4::splat(0.7152),
             luma_weights_b: F32x4::splat(0.0722),
             inv_white_point2: F32x4::splat(1.0 / (white_point * white_point)),
             exposure: F32x4::splat(exposure),
-            inv_gamma: F32x4::splat(1.0 / gamma),
         }
     }
 
@@ -39,7 +37,6 @@ impl ReinhardToneMapper {
         let luma_weights_g: F32x4 = self.luma_weights_g;
         let luma_weights_b: F32x4 = self.luma_weights_b;
         let inv_white_point2: F32x4 = self.inv_white_point2;
-        let inv_gamma: F32x4 = self.inv_gamma;
         for _idx in 0..steps {
             // Load inputs in sRGB primaries with a linear gamma ramp
             let r: F32x4 = F32x4::load(unsafe { *(r_ptr as *const [f32; 4]) });
@@ -62,11 +59,10 @@ impl ReinhardToneMapper {
             let gt: F32x4 = ge * scale;
             let bt: F32x4 = be * scale;
 
-            // Gamma-correction
-            // TODO: write a SIMD power() function for the fixed gamma=2.2?
-            let rc: F32x4 = (rt.log() * inv_gamma).exp();
-            let gc: F32x4 = (gt.log() * inv_gamma).exp();
-            let bc: F32x4 = (bt.log() * inv_gamma).exp();
+            // Gamma-correction: v = v^(1.0/2.0)
+            let rc: F32x4 = rt.sqrt();
+            let gc: F32x4 = gt.sqrt();
+            let bc: F32x4 = bt.sqrt();
 
             // Clamp the values to [0.0, 1.0] and convert to [0.0, 255.0]
             let r_out: F32x4 = (rc.min(one).max(zero)) * to_255;
