@@ -95,10 +95,10 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         let mut vec_z_4: F32x4 = F32x4::splat(dir_row.z) + dir_offset_z_4;
         for x in (0..width).step_by(4) {
             // normalize the components of the direction vector
-            let vec_len: F32x4 = (vec_x_4 * vec_x_4 + vec_y_4 * vec_y_4 + vec_z_4 * vec_z_4).sqrt();
-            let normalized_vec_x_4: F32x4 = vec_x_4 / vec_len;
-            let normalized_vec_y_4: F32x4 = vec_y_4 / vec_len;
-            let normalized_vec_z_4: F32x4 = vec_z_4 / vec_len;
+            let recip_len_sqrt: F32x4 = (vec_x_4 * vec_x_4 + vec_y_4 * vec_y_4 + vec_z_4 * vec_z_4).rsqrt();
+            let normalized_vec_x_4: F32x4 = vec_x_4 * recip_len_sqrt;
+            let normalized_vec_y_4: F32x4 = vec_y_4 * recip_len_sqrt;
+            let normalized_vec_z_4: F32x4 = vec_z_4 * recip_len_sqrt;
             // cos(theta) - cos(angle between the zenith and the view direction)
             let theta_cos_4: F32x4 = normalized_vec_y_4;
             // gamma_cos = dot(dir, sun_dir).clamp(-1.0, 1.0);
@@ -261,6 +261,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut show_wireframe: bool = false;
     let mut paused = false;
     let mut event_pump = sdl_context.event_pump().map_err(|e| e.to_string())?;
+    let mut faces_build_time: f32 = 0.0;
+    let mut faces_build_time_n: u32 = 0;
     loop {
         // Poll for SDL events
         for event in event_pump.poll_iter() {
@@ -331,11 +333,20 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             let theta_sun: f32 = sun_dir.y.acos(); // angle from zenith, radians
             let sun_elevation: f32 = (3.14 / 2.0 - theta_sun).max(0.0); // angle from the horizon, radians
             let sky: HosekWilkieSky = HosekWilkieSky::new(sky_turbidity, ground_albedo, sun_elevation);
+            let start = std::time::Instant::now();
             neg_x_tex = build_face(&sky, Face::XNeg, sun_dir);
             pos_x_tex = build_face(&sky, Face::XPos, sun_dir);
             pos_y_tex = build_face(&sky, Face::YPos, sun_dir);
             pos_z_tex = build_face(&sky, Face::ZPos, sun_dir);
             neg_z_tex = build_face(&sky, Face::ZNeg, sun_dir);
+            let duration = std::time::Instant::now() - start;
+            faces_build_time += duration.as_secs_f32();
+            faces_build_time_n += 1;
+            if faces_build_time_n == 1000 {
+                println!("build_face: {:.1}ms", faces_build_time);
+                faces_build_time = 0.0;
+                faces_build_time_n = 0;
+            }
             rebuild_skybox = false;
         }
 

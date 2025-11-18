@@ -349,6 +349,25 @@ impl F32x4 {
         }
     }
 
+    /// Calculates a reciprocal square root approximation
+    #[inline(always)]
+    pub fn rsqrt(self) -> Self {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            {
+                use core::arch::x86_64::*;
+                Self { inner: _mm_rsqrt_ps(self.inner) }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                use core::arch::aarch64::*;
+                let mut reciprocal: float32x4_t = vrsqrteq_f32(self.inner);
+                reciprocal = vmulq_f32(vrsqrtsq_f32(vmulq_f32(self.inner, reciprocal), reciprocal), reciprocal);
+                Self { inner: reciprocal }
+            }
+        }
+    }
 
     /// Calculates an exponent function
     #[inline(always)]
