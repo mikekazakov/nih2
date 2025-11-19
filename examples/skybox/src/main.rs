@@ -43,6 +43,13 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
     let mut texels: Vec<u8> = Vec::<u8>::new();
     texels.resize(width * height * 3, 127);
     let height_max = if face == Face::YPos { height } else { height / 2 };
+    
+    let sun_zenith_color: Vec3 = Vec3::new(58.0, 55.0, 29.0);
+    let sun_horizon_color: Vec3 = Vec3::new(60.0, 57.0, 27.0);
+    let sun_base_size: f32 = 0.055;
+    let sun_size: f32 = sun_base_size + (1.0 - sun_dir.y * sun_dir.y).sqrt() * sun_base_size * 0.25;
+    let sun_size_inv: f32 = 1.0 / sun_size;
+    let sun_color: Vec3 = lerp(sun_horizon_color, sun_zenith_color, sun_dir.y.abs());
 
     let mut theta_cos_row: Vec<f32> = vec![0.0; width];
     let mut gamma_cos_row: Vec<f32> = vec![0.0; width];
@@ -125,13 +132,12 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         // Inject 'the Sun' into the sky.
         for x in 0..width {
             let gamma: f32 = gamma_row[x];
-            let sun_angular_radius = 0.03; // ~0.5 degrees
-            let sun_intensity = 5.0; // multiplier at Sun center
-            if gamma < sun_angular_radius {
-                let falloff: f32 = (1.618 - 1.0 / (1.618 - gamma / sun_angular_radius)).max(0.0);
-                r_row[x] += r_row[x] * sun_intensity * falloff;
-                g_row[x] += g_row[x] * sun_intensity * falloff;
-                b_row[x] += b_row[x] * sun_intensity * falloff;
+            let sun_amount: f32 = (1.0 - gamma * sun_size_inv).clamp(0.0, 1.0);
+            if sun_amount > 0.0 {
+                let sun_color: Vec3 = sun_color * (sun_amount * sun_amount);
+                r_row[x] += sun_color.x;
+                g_row[x] += sun_color.y;
+                b_row[x] += sun_color.z;
             }
         }
 
@@ -254,6 +260,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut t = 0.0;
     let mut dt: f32 = 0.0;
     let mut sky_turbidity: f32 = 3.0;
+    // let mut sky_turbidity: f32 = 1.0;
     let mut ground_albedo: Vec3 = Vec3::new(0.0, 0.0, 0.5);
     let mut rebuild_skybox: bool = true;
     let mut camera_orientation: Quat = Quat::from_axis_angle(Vec3::new(0.0, 0.0, -1.0), 0.0);
@@ -326,7 +333,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         dt = (std::time::Instant::now() - last).as_secs_f32();
         last = std::time::Instant::now();
-        println!("FPS: {:.0}", 1.0 / dt);
+        // println!("FPS: {:.0}", 1.0 / dt);
 
         if rebuild_skybox {
             let sun_dir: Vec3 = Vec3::new(0.0, (t * 0.1).sin(), -(t * 0.1).cos()).normalized();
