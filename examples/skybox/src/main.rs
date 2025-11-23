@@ -541,12 +541,24 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             let theta_sun: f32 = sun_dir.y.acos(); // angle from zenith, radians
             let sun_elevation: f32 = (3.14 / 2.0 - theta_sun).max(0.0); // angle from the horizon, radians
             let sky: HosekWilkieSky = HosekWilkieSky::new(sky_turbidity, ground_albedo, sun_elevation);
+            let faces = [
+                Face::YPos,
+                Face::XNeg,
+                Face::XPos,
+                Face::ZPos,
+                Face::ZNeg,
+            ];
             let start = std::time::Instant::now();
-            neg_x_tex = build_face(&sky, Face::XNeg, sun_dir);
-            pos_x_tex = build_face(&sky, Face::XPos, sun_dir);
-            pos_y_tex = build_face(&sky, Face::YPos, sun_dir);
-            pos_z_tex = build_face(&sky, Face::ZPos, sun_dir);
-            neg_z_tex = build_face(&sky, Face::ZNeg, sun_dir);
+            use rayon::prelude::*;
+            let results: Vec<Arc<Texture>> = faces
+                .par_iter()
+                .map(|face| build_face(&sky, *face, sun_dir))
+                .collect();
+            pos_y_tex = results[0].clone();
+            neg_x_tex = results[1].clone();
+            pos_x_tex = results[2].clone();
+            pos_z_tex = results[3].clone();
+            neg_z_tex = results[4].clone();
             let duration = std::time::Instant::now() - start;
             faces_build_time += duration.as_secs_f32();
             faces_build_time_n += 1;
