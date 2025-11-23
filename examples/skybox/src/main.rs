@@ -14,7 +14,7 @@ use sdl3::pixels::PixelFormat;
 use sdl3::surface::Surface;
 use std::sync::Arc;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy, Debug, Hash, Eq, PartialOrd, Ord)]
 enum Face {
     XNeg,
     XPos,
@@ -35,28 +35,213 @@ fn camera_to_mat34(orientation: Quat, position: Vec3) -> Mat34 {
     ])
 }
 
+fn project_dir_to_face_uv(face: Face, dir: Vec3) -> Option<(f32, f32)> {
+    let ax: f32 = dir.x.abs();
+    let ay: f32 = dir.y.abs();
+    let az: f32 = dir.z.abs();
+    match face {
+        Face::XPos if ax >= ay && ax >= az => {
+            if dir.x <= 0.0 {
+                return None;
+            }
+            let sc: f32 = 1.0 / ax;
+            Some((dir.z * sc, dir.y * sc))
+        }
+        Face::XNeg if ax >= ay && ax >= az => {
+            if dir.x >= 0.0 {
+                return None;
+            }
+            let sc: f32 = -1.0 / ax;
+            Some((dir.z * sc, -dir.y * sc))
+        }
+        Face::YPos if ay >= ax && ay >= az => {
+            if dir.y <= 0.0 {
+                return None;
+            }
+            let sc: f32 = 1.0 / ay;
+            Some((dir.x * sc, dir.z * sc))
+        }
+        Face::YNeg if ay >= ax && ay >= az => {
+            if dir.x >= 0.0 {
+                return None;
+            }
+            let sc: f32 = -1.0 / ay;
+            Some((dir.x * sc, -dir.z * sc))
+        }
+        Face::ZPos if az >= ax && az >= ay => {
+            if dir.z <= 0.0 {
+                return None;
+            }
+            let sc: f32 = 1.0 / az;
+            Some((-dir.x * sc, dir.y * sc))
+        }
+        Face::ZNeg if az >= ax && az >= ay => {
+            if dir.z >= 0.0 {
+                return None;
+            }
+            let sc: f32 = -1.0 / az;
+            Some((-dir.x * sc, -dir.y * sc))
+        }
+        _ => None,
+    }
+}
+
+fn project_dir_to_face_xy(face: Face, dir: Vec3, width: f32, height: f32) -> Option<(i32, i32)> {
+    if let Some((u, v)) = project_dir_to_face_uv(face, dir) {
+        Some((((u * 0.5 + 0.5) * width) as i32, ((v * -0.5 + 0.5) * height) as i32))
+    } else {
+        None
+    }
+}
+
+fn compute_sun_edge_16(sun_dir: Vec3, sun_radius: f32, offset_angle_rad: f32) -> [Vec3; 16] {
+    // --- Step 1: stable orthonormal basis around sun_dir ---
+    let up = if sun_dir.y.abs() < 0.99 {
+        Vec3::new(0.0, 1.0, 0.0)
+    } else {
+        Vec3::new(1.0, 0.0, 0.0)
+    };
+
+    let ex = cross(sun_dir, up).normalized();
+    let ey = cross(sun_dir, ex).normalized();
+
+    // --- Step 2: precompute cos/sin(radius) ---
+    let cos_r = sun_radius.cos();
+    let sin_r = sun_radius.sin();
+
+    // --- Step 3: produce 16 angles around the circle ---
+    let mut result = [Vec3::new(0.0, 0.0, 0.0); 16];
+
+    for i in 0..16 {
+        // angle = offset + i * 360°/16 = offset + i * 22.5°
+        let phi = offset_angle_rad + (i as f32) * (std::f32::consts::TAU / 16.0);
+        let phi_cos = phi.cos();
+        let phi_sin = phi.sin();
+
+        // spherical rim position
+        // R = cos(r)*D + sin(r)*(cos(phi)*ex + sin(phi)*ey)
+        let dir = sun_dir * cos_r + ex * (phi_cos * sin_r) + ey * (phi_sin * sin_r);
+
+        result[i] = dir.normalized();
+    }
+
+    result
+}
+
+fn inject_sun(
+    r: &mut [f32],
+    g: &mut [f32],
+    b: &mut [f32],
+    gamma_row: &[f32],
+    neg_sun_size_inv: f32,
+    sun_color: Vec3,
+    x_min: usize,
+    x_max: usize,
+) {
+    debug_assert!(r.len() == g.len() && r.len() == b.len() && r.len() == gamma_row.len());
+    debug_assert!(x_min <= x_max);
+    debug_assert!(x_max <= r.len());
+    debug_assert_eq!(x_min % 4, 0);
+    debug_assert_eq!(x_max % 4, 0);
+
+    // Setup the raw pointers
+    let mut r_ptr: *mut f32 = unsafe { r.as_mut_ptr().add(x_min) };
+    let mut g_ptr: *mut f32 = unsafe { g.as_mut_ptr().add(x_min) };
+    let mut b_ptr: *mut f32 = unsafe { b.as_mut_ptr().add(x_min) };
+    let mut gamma_ptr: *const f32 = unsafe { gamma_row.as_ptr().add(x_min) };
+
+    // Setup the uniforms
+    let neg_sun_size_inv: F32x4 = F32x4::splat(neg_sun_size_inv);
+    let one: F32x4 = F32x4::splat(1.0);
+    let zero: F32x4 = F32x4::splat(0.0);
+    let sun_color_r: F32x4 = F32x4::splat(sun_color.x);
+    let sun_color_g: F32x4 = F32x4::splat(sun_color.y);
+    let sun_color_b: F32x4 = F32x4::splat(sun_color.z);
+
+    let steps: usize = (x_max - x_min) / 4;
+    for _idx in 0..steps {
+        // Load the inputs
+        let gamma: F32x4 = F32x4::load(unsafe { *(gamma_ptr as *const [f32; 4]) });
+        let r: F32x4 = F32x4::load(unsafe { *(r_ptr as *const [f32; 4]) });
+        let g: F32x4 = F32x4::load(unsafe { *(g_ptr as *const [f32; 4]) });
+        let b: F32x4 = F32x4::load(unsafe { *(b_ptr as *const [f32; 4]) });
+
+        // sun_amount = (1.0 - gamma * sun_size_inv).max(0.0)
+        let sun_amount: F32x4 = gamma.fma(neg_sun_size_inv, one).max(zero);
+
+        // sun_color * (sun_amount * sun_amount);
+        let sun_amount_2: F32x4 = sun_amount * sun_amount;
+        let sun_r: F32x4 = sun_color_r * sun_amount_2;
+        let sun_g: F32x4 = sun_color_g * sun_amount_2;
+        let sun_b: F32x4 = sun_color_b * sun_amount_2;
+
+        // sky_color += sun_color
+        let r_out: F32x4 = r + sun_r;
+        let g_out: F32x4 = g + sun_g;
+        let b_out: F32x4 = b + sun_b;
+
+        // Write the updated radiance out
+        r_out.store_to(unsafe { &mut *(r_ptr as *mut [f32; 4]) });
+        g_out.store_to(unsafe { &mut *(g_ptr as *mut [f32; 4]) });
+        b_out.store_to(unsafe { &mut *(b_ptr as *mut [f32; 4]) });
+
+        // Advance the input/output pointers
+        r_ptr = unsafe { r_ptr.add(4) };
+        g_ptr = unsafe { g_ptr.add(4) };
+        b_ptr = unsafe { b_ptr.add(4) };
+        gamma_ptr = unsafe { gamma_ptr.add(4) };
+    }
+}
+
 fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
     let width = 512;
     let height = 512;
     let tone_mapper = ReinhardToneMapper::new(0.5, 14.0);
 
-    let mut texels: Vec<u8> = Vec::<u8>::new();
-    texels.resize(width * height * 3, 127);
-    let height_max = if face == Face::YPos { height } else { height / 2 };
-    
+    // Setup the Sun stuff
     let sun_zenith_color: Vec3 = Vec3::new(58.0, 55.0, 29.0);
     let sun_horizon_color: Vec3 = Vec3::new(60.0, 57.0, 27.0);
     let sun_base_size: f32 = 0.055;
     let sun_size: f32 = sun_base_size + (1.0 - sun_dir.y * sun_dir.y).sqrt() * sun_base_size * 0.25;
-    let sun_size_inv: f32 = 1.0 / sun_size;
+    let sun_neg_size_inv: f32 = -1.0 / sun_size;
     let sun_color: Vec3 = lerp(sun_horizon_color, sun_zenith_color, sun_dir.y.abs());
+    let sun_edge_dirs: [Vec3; 16] = compute_sun_edge_16(sun_dir, sun_size, 3.14 / 32.0);
+    let sun_edge_projected: [Option<(i32, i32)>; 16] =
+        std::array::from_fn(|i| project_dir_to_face_xy(face, sun_edge_dirs[i], width as f32, height as f32));
+    let sun_any_edge_projected: bool = sun_edge_projected.iter().any(|xy| xy.is_some());
+    let (sun_min_y, sun_max_y, sun_min_x, sun_max_x): (i32, i32, i32, i32) = if sun_any_edge_projected {
+        let mut min_y: i32 = i32::MAX;
+        let mut max_y: i32 = i32::MIN;
+        let mut min_x: i32 = i32::MAX;
+        let mut max_x: i32 = i32::MIN;
+        for sun_edge_xy in sun_edge_projected {
+            if let Some((sun_edge_x, sun_edge_y)) = sun_edge_xy {
+                min_y = min_y.min(sun_edge_y);
+                max_y = max_y.max(sun_edge_y);
+                min_x = min_x.min(sun_edge_x);
+                max_x = max_x.max(sun_edge_x);
+            }
+        }
+        let gap: i32 = 10;
+        (min_y - gap, max_y + gap, min_x - gap, max_x + gap)
+    } else {
+        (0, -1, 0, -1)
+    };
+    let sun_min_x: usize = (sun_min_x.max(0) as usize) & (!3);
+    let sun_max_x: usize = (sun_max_x.min(width as i32) as usize) & (!3);
 
+    // Allocate buffers for intermediate results.
     let mut theta_cos_row: Vec<f32> = vec![0.0; width];
     let mut gamma_cos_row: Vec<f32> = vec![0.0; width];
     let mut gamma_row: Vec<f32> = vec![0.0; width];
     let mut r_row: Vec<f32> = vec![0.0; width];
     let mut g_row: Vec<f32> = vec![0.0; width];
     let mut b_row: Vec<f32> = vec![0.0; width];
+
+    // Allocate the texture buffer.
+    let mut texels: Vec<u8> = Vec::<u8>::new();
+    texels.resize(width * height * 3, 127);
+    let height_max = if face == Face::YPos { height } else { height / 2 };
 
     // Set up the initial direction vector for y=0/x=0, depending on the face.
     // TODO: not actually precisely -1.0/+1.0?..
@@ -109,9 +294,11 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
             // cos(theta) - cos(angle between the zenith and the view direction)
             let theta_cos_4: F32x4 = normalized_vec_y_4;
             // gamma_cos = dot(dir, sun_dir).clamp(-1.0, 1.0);
-            let gamma_cos_4: F32x4 = (normalized_vec_x_4 * sun_dir_x_4 +
-                normalized_vec_y_4 * sun_dir_y_4 +
-                normalized_vec_z_4 * sun_dir_z_4).min(F32x4::splat(1.0)).max(F32x4::splat(-1.0));
+            let gamma_cos_4: F32x4 = (normalized_vec_x_4 * sun_dir_x_4
+                + normalized_vec_y_4 * sun_dir_y_4
+                + normalized_vec_z_4 * sun_dir_z_4)
+                .min(F32x4::splat(1.0))
+                .max(F32x4::splat(-1.0));
             // gamma - angle between the view direction and the Sun
             let gamma_4: F32x4 = gamma_cos_4.acos();
             theta_cos_4.store_to(unsafe { &mut *(theta_cos_row.as_mut_ptr().add(x) as *mut [f32; 4]) });
@@ -130,15 +317,17 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         sky.f_simd_b(&gamma_row, &theta_cos_row, &gamma_cos_row, &mut b_row);
 
         // Inject 'the Sun' into the sky.
-        for x in 0..width {
-            let gamma: f32 = gamma_row[x];
-            let sun_amount: f32 = (1.0 - gamma * sun_size_inv).clamp(0.0, 1.0);
-            if sun_amount > 0.0 {
-                let sun_color: Vec3 = sun_color * (sun_amount * sun_amount);
-                r_row[x] += sun_color.x;
-                g_row[x] += sun_color.y;
-                b_row[x] += sun_color.z;
-            }
+        if sun_any_edge_projected && (y as i32 >= sun_min_y) && (y as i32 <= sun_max_y) {
+            inject_sun(
+                &mut r_row,
+                &mut g_row,
+                &mut b_row,
+                &gamma_row,
+                sun_neg_size_inv,
+                sun_color,
+                sun_min_x,
+                sun_max_x,
+            );
         }
 
         // Map the radiance values to RGB colors and store them in the texture.
@@ -159,8 +348,16 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
 fn test_hosek_wilkie_sky() {
     // The reference outputs were copied from the results of running the code from the original paper.
     let sky1: HosekWilkieSky = HosekWilkieSky::new(2.0, Vec3::new(0.0, 0.0, 0.0), std::f32::consts::FRAC_PI_4);
-    assert!((sky1.f(0.0, std::f32::consts::FRAC_PI_4.cos(), 0.0f32.cos()) - Vec3::new(8.663214, 11.592292, 16.004868)).length() < 0.01);
-    assert!((sky1.f(0.1, std::f32::consts::FRAC_PI_4.cos(), 0.1f32.cos()) - Vec3::new(7.697937, 10.479785, 15.563609)).length() < 0.01);
+    assert!(
+        (sky1.f(0.0, std::f32::consts::FRAC_PI_4.cos(), 0.0f32.cos()) - Vec3::new(8.663214, 11.592292, 16.004868))
+            .length()
+            < 0.01
+    );
+    assert!(
+        (sky1.f(0.1, std::f32::consts::FRAC_PI_4.cos(), 0.1f32.cos()) - Vec3::new(7.697937, 10.479785, 15.563609))
+            .length()
+            < 0.01
+    );
     assert!((sky1.f(0.1, 0.6f32.cos(), 0.1f32.cos()) - Vec3::new(6.292841, 8.564651, 13.267812)).length() < 0.01);
     let sky2: HosekWilkieSky = HosekWilkieSky::new(3.0, Vec3::new(0.6, 0.2, 0.9), 1.0);
     assert!((sky2.f(0.1, 0.6f32.cos(), 0.1f32.cos()) - Vec3::new(15.872860, 17.629661, 26.922695)).length() < 0.01);
@@ -287,9 +484,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("turbidity: {}", sky_turbidity);
                     rebuild_skybox = true;
                 }
-                Event::KeyDown { keycode: Some(Keycode::T), .. } | Event::KeyDown { keycode: Some(Keycode::G), .. } | Event::KeyDown { keycode: Some(Keycode::Y), .. }
-                | Event::KeyDown { keycode: Some(Keycode::H), .. } | Event::KeyDown { keycode: Some(Keycode::U), .. } | Event::KeyDown { keycode: Some(Keycode::J), .. }
-                => {
+                Event::KeyDown { keycode: Some(Keycode::T), .. }
+                | Event::KeyDown { keycode: Some(Keycode::G), .. }
+                | Event::KeyDown { keycode: Some(Keycode::Y), .. }
+                | Event::KeyDown { keycode: Some(Keycode::H), .. }
+                | Event::KeyDown { keycode: Some(Keycode::U), .. }
+                | Event::KeyDown { keycode: Some(Keycode::J), .. } => {
                     if let Event::KeyDown { keycode: Some(Keycode::T), .. } = event {
                         ground_albedo.x += 0.1;
                     }
@@ -318,7 +518,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let angle_yaw: f32 = -xrel * sensitivity;
                         let angle_pitch: f32 = -yrel * sensitivity;
                         let yaw: Quat = Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), angle_yaw);
-                        let pitch: Quat = Quat::from_axis_angle(camera_orientation * Vec3::new(1.0, 0.0, 0.0), angle_pitch);
+                        let pitch: Quat =
+                            Quat::from_axis_angle(camera_orientation * Vec3::new(1.0, 0.0, 0.0), angle_pitch);
                         camera_orientation = (yaw * pitch * camera_orientation).normalized();
                     }
                 }
@@ -336,7 +537,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         // println!("FPS: {:.0}", 1.0 / dt);
 
         if rebuild_skybox {
-            let sun_dir: Vec3 = Vec3::new(0.0, (t * 0.1).sin(), -(t * 0.1).cos()).normalized();
+            let sun_dir: Vec3 = Vec3::new((t * 0.1).sin() * 0.5, (t * 0.1).sin(), -(t * 0.1).cos()).normalized();
             let theta_sun: f32 = sun_dir.y.acos(); // angle from zenith, radians
             let sun_elevation: f32 = (3.14 / 2.0 - theta_sun).max(0.0); // angle from the horizon, radians
             let sky: HosekWilkieSky = HosekWilkieSky::new(sky_turbidity, ground_albedo, sun_elevation);
