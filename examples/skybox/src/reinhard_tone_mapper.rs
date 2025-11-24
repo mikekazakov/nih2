@@ -19,7 +19,7 @@ impl ReinhardToneMapper {
         }
     }
 
-    pub fn map(&self, r: &[f32], g: &[f32], b: &[f32], texels24: &mut [u8]) {
+    pub fn map(&self, r: &[f32], g: &[f32], b: &[f32], texels24: &mut [u8], y: usize) {
         assert!(r.len() == g.len() && r.len() == b.len());
         assert_eq!(r.len() % 4, 0);
         assert_eq!(texels24.len(), r.len() * 3);
@@ -37,6 +37,9 @@ impl ReinhardToneMapper {
         let luma_weights_g: F32x4 = self.luma_weights_g;
         let luma_weights_b: F32x4 = self.luma_weights_b;
         let inv_white_point2: F32x4 = self.inv_white_point2;
+        let noise_r: F32x4 = F32x4::load(NOISE_TABLE[(y + 0) % 16]);
+        let noise_g: F32x4 = F32x4::load(NOISE_TABLE[(y + 1) % 16]);
+        let noise_b: F32x4 = F32x4::load(NOISE_TABLE[(y + 2) % 16]);
         for _idx in 0..steps {
             // Load inputs in sRGB primaries with a linear gamma ramp
             let r: F32x4 = F32x4::load(unsafe { *(r_ptr as *const [f32; 4]) });
@@ -64,10 +67,15 @@ impl ReinhardToneMapper {
             let gc: F32x4 = gt.sqrt();
             let bc: F32x4 = bt.sqrt();
 
+            // Apply some noise for dithering
+            let r_final: F32x4 = rc + noise_r;
+            let g_final: F32x4 = gc + noise_g;
+            let b_final: F32x4 = bc + noise_b;
+
             // Clamp the values to [0.0, 1.0] and convert to [0.0, 255.0]
-            let r_out: F32x4 = (rc.min(one).max(zero)) * to_255;
-            let g_out: F32x4 = (gc.min(one).max(zero)) * to_255;
-            let b_out: F32x4 = (bc.min(one).max(zero)) * to_255;
+            let r_out: F32x4 = r_final.min(one).max(zero) * to_255;
+            let g_out: F32x4 = g_final.min(one).max(zero) * to_255;
+            let b_out: F32x4 = b_final.min(one).max(zero) * to_255;
 
             // Convert to integers [0, 255]
             let r_u32: [u32; 4] = r_out.to_u32().store();
@@ -98,3 +106,36 @@ impl ReinhardToneMapper {
         }
     }
 }
+
+static NOISE_TABLE: [[f32; 4]; 16] = {
+    const RAW_NOISE_TABLE: [[f32; 4]; 16] = [
+        [0.732, -0.418, 0.091, -0.857],
+        [-0.624, 0.289, 0.951, -0.103],
+        [0.476, -0.812, 0.138, -0.369],
+        [-0.295, 0.763, -0.581, 0.412],
+        [0.684, -0.157, 0.328, -0.749],
+        [-0.491, 0.856, -0.233, 0.617],
+        [0.372, -0.689, 0.145, -0.514],
+        [-0.267, 0.591, -0.804, 0.438],
+        [0.723, -0.342, 0.019, -0.661],
+        [0.214, -0.873, 0.596, -0.048],
+        [-0.731, 0.382, -0.119, 0.905],
+        [0.467, 0.058, -0.992, 0.341],
+        [-0.553, -0.247, 0.784, -0.164],
+        [0.129, 0.944, -0.403, 0.278],
+        [-0.816, 0.256, 0.672, -0.294],
+        [0.503, -0.957, 0.188, 0.421],
+    ];
+    let mut noise_table: [[f32; 4]; 16] = [[0.0; 4]; 16];
+    let scale: f32 = 1.0 / 256.0;
+    let mut i: usize = 0;
+    while i < 16 {
+        let mut j: usize = 0;
+        while j < 4 {
+            noise_table[i][j] = RAW_NOISE_TABLE[i][j] * scale;
+            j += 1;
+        }
+        i += 1;
+    }
+    noise_table
+};

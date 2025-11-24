@@ -331,7 +331,7 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
         }
 
         // Map the radiance values to RGB colors and store them in the texture.
-        tone_mapper.map(&r_row, &g_row, &b_row, texels[y * width * 3..y * width * 3 + width * 3].as_mut());
+        tone_mapper.map(&r_row, &g_row, &b_row, texels[y * width * 3..y * width * 3 + width * 3].as_mut(), y);
 
         // Step the direction vector forward by 1 row
         dir_row += dir_dy;
