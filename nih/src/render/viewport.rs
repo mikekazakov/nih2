@@ -11,3 +11,9 @@ impl Viewport {
         Viewport { xmin, ymin, xmax, ymax }
     }
 }
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Viewport::new(0, 0, 1, 1)
+    }
+}

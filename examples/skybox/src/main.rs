@@ -1,6 +1,8 @@
+mod flares;
 mod hosek_wilkie_sky;
 mod reinhard_tone_mapper;
 
+use crate::flares::{Flare, Flares};
 use crate::hosek_wilkie_sky::HosekWilkieSky;
 use crate::reinhard_tone_mapper::ReinhardToneMapper;
 use nih::math::simd::F32x4;
@@ -12,6 +14,7 @@ use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::pixels::PixelFormat;
 use sdl3::surface::Surface;
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(PartialEq, Clone, Copy, Debug, Hash, Eq, PartialOrd, Ord)]
@@ -222,7 +225,7 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
                 max_x = max_x.max(sun_edge_x);
             }
         }
-        let gap: i32 = 10;
+        let gap: i32 = 12;
         (min_y - gap, max_y + gap, min_x - gap, max_x + gap)
     } else {
         (0, -1, 0, -1)
@@ -345,6 +348,79 @@ fn build_face(sky: &HosekWilkieSky, face: Face, sun_dir: Vec3) -> Arc<Texture> {
     })
 }
 
+fn load_tex<P: AsRef<Path>>(path: P) -> Arc<Texture> {
+    let image = image::open(Path::new(env!("CARGO_MANIFEST_DIR")).join("res/").join(path))
+        .unwrap()
+        .into_rgba8();
+    let width = image.width();
+    let height = image.height();
+    let texels: Vec<u8> = image.pixels().flat_map(|p| p.0[..4].iter().copied()).collect();
+    Texture::new(&TextureSource { width, height, format: TextureFormat::RGBA, texels: &texels })
+}
+
+fn init_flares() -> Flares {
+    let flare_tex1 = load_tex("flare1.png");
+    let flare_tex2 = load_tex("flare2.png");
+    let flare_tex3 = load_tex("flare3.png");
+    let mut flares: Flares = Flares::new();
+
+    let mut flare1: Flare = Flare::default();
+    flare1.texture = flare_tex2.clone();
+    flare1.scale1 = 0.2;
+    flare1.scale0 = 0.1;
+    flare1.angle1 = 0.7;
+    flare1.angle0 = 0.1;
+    flare1.alpha1 = -0.4;
+    flare1.alpha0 = 0.6;
+    flares.add_flare(flare1);
+
+    let mut flare2: Flare = Flare::default();
+    flare2.texture = flare_tex3.clone();
+    flare2.scale1 = 0.1;
+    flare2.pos1 = 0.5;
+    flare2.scale1 = 0.1;
+    flare2.scale0 = 0.05;
+    flare2.angle1 = -0.3;
+    flare2.angle0 = 0.2;
+    flare2.alpha1 = -0.3;
+    flare2.alpha0 = 1.0;
+    flares.add_flare(flare2);
+
+    let mut flare3: Flare = Flare::default();
+    flare3.texture = flare_tex1.clone();
+    flare3.pos1 = -1.5;
+    flare3.scale1 = -0.1;
+    flare3.scale0 = 0.1;
+    flare3.angle0 = 0.3;
+    flares.add_flare(flare3);
+
+    let mut flare4: Flare = Flare::default();
+    flare4.texture = flare_tex1.clone();
+    flare4.scale1 = 0.1;
+    flare4.pos1 = 0.05;
+    flare4.scale1 = 0.05;
+    flare4.scale0 = 0.02;
+    flare4.angle1 = 0.2;
+    flare4.angle0 = 0.5;
+    flare4.alpha1 = -0.1;
+    flare4.alpha0 = 0.8;
+    flares.add_flare(flare4);
+
+    let mut flare5: Flare = Flare::default();
+    flare5.texture = flare_tex1.clone();
+    flare5.scale1 = 0.1;
+    flare5.pos1 = -0.5;
+    flare5.scale1 = 0.05;
+    flare5.scale0 = 0.02;
+    flare5.angle1 = -0.1;
+    flare5.angle0 = 0.3;
+    flare5.alpha1 = -0.1;
+    flare5.alpha0 = 0.6;
+    flares.add_flare(flare5);
+
+    flares
+}
+
 fn test_hosek_wilkie_sky() {
     // The reference outputs were copied from the results of running the code from the original paper.
     let sky1: HosekWilkieSky = HosekWilkieSky::new(2.0, Vec3::new(0.0, 0.0, 0.0), std::f32::consts::FRAC_PI_4);
@@ -451,13 +527,14 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     // Allocate the buffers and the rasterizer
+    let mut viewport: Viewport = Viewport::default();
     let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(1, 1);
     let mut rasterizer = Rasterizer::new();
     let mut last = std::time::Instant::now();
     let mut t = 0.0;
     let mut dt: f32 = 0.0;
+    let mut sun_dir: Vec3 = Vec3::new(0.0, 0.0, -1.0).normalized();
     let mut sky_turbidity: f32 = 3.0;
-    // let mut sky_turbidity: f32 = 1.0;
     let mut ground_albedo: Vec3 = Vec3::new(0.0, 0.0, 0.5);
     let mut rebuild_skybox: bool = true;
     let mut camera_orientation: Quat = Quat::from_axis_angle(Vec3::new(0.0, 0.0, -1.0), 0.0);
@@ -467,6 +544,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_pump = sdl_context.event_pump().map_err(|e| e.to_string())?;
     let mut faces_build_time: f32 = 0.0;
     let mut faces_build_time_n: u32 = 0;
+    let flares: Flares = init_flares();
+
     loop {
         // Poll for SDL events
         for event in event_pump.poll_iter() {
@@ -534,26 +613,17 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         dt = (std::time::Instant::now() - last).as_secs_f32();
         last = std::time::Instant::now();
-        // println!("FPS: {:.0}", 1.0 / dt);
+        println!("FPS: {:.0}", 1.0 / dt);
 
         if rebuild_skybox {
-            let sun_dir: Vec3 = Vec3::new((t * 0.1).sin() * 0.5, (t * 0.1).sin(), -(t * 0.1).cos()).normalized();
+            sun_dir = Vec3::new((t * 0.1).sin() * 0.5, (t * 0.1).sin(), -(t * 0.1).cos()).normalized();
             let theta_sun: f32 = sun_dir.y.acos(); // angle from zenith, radians
             let sun_elevation: f32 = (3.14 / 2.0 - theta_sun).max(0.0); // angle from the horizon, radians
             let sky: HosekWilkieSky = HosekWilkieSky::new(sky_turbidity, ground_albedo, sun_elevation);
-            let faces = [
-                Face::YPos,
-                Face::XNeg,
-                Face::XPos,
-                Face::ZPos,
-                Face::ZNeg,
-            ];
+            let faces = [Face::YPos, Face::XNeg, Face::XPos, Face::ZPos, Face::ZNeg];
             let start = std::time::Instant::now();
             use rayon::prelude::*;
-            let results: Vec<Arc<Texture>> = faces
-                .par_iter()
-                .map(|face| build_face(&sky, *face, sun_dir))
-                .collect();
+            let results: Vec<Arc<Texture>> = faces.par_iter().map(|face| build_face(&sky, *face, sun_dir)).collect();
             pos_y_tex = results[0].clone();
             neg_x_tex = results[1].clone();
             pos_x_tex = results[2].clone();
@@ -574,7 +644,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let size = window.size();
         if color_buffer.width() != size.0 as u16 || color_buffer.height() != size.1 as u16 {
             color_buffer = TiledBuffer::<u32, 64, 64>::new(size.0 as u16, size.1 as u16);
-            rasterizer.setup(Viewport::new(0, 0, size.0 as u16, size.1 as u16));
+            viewport = Viewport::new(0, 0, size.0 as u16, size.1 as u16);
+            rasterizer.setup(viewport);
         }
         color_buffer.fill(RGBA::new(102, 204, 255, 255).to_u32());
         rasterizer.reset();
@@ -586,7 +657,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let view: Mat44 = camera_to_mat34(camera_orientation, camera_position).as_mat44();
         let view_orientation: Mat44 = view.as_mat33().as_mat44();
 
-        // draw the skybox
+        // draw the skybox and the flares
         let mut commit_face = |pos: &[Vec3; 6], texture: &Arc<Texture>| {
             rasterizer.commit(&RasterizationCommand {
                 world_positions: pos,
@@ -605,6 +676,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         commit_face(&pos_y_positions, &pos_y_tex);
         commit_face(&neg_z_positions, &neg_z_tex);
         commit_face(&pos_z_positions, &pos_z_tex);
+        flares.commit(viewport, &view_orientation, &projection, sun_dir, &mut rasterizer);
         rasterizer.draw(&mut Framebuffer { color_buffer: Some(&mut color_buffer), ..Default::default() });
 
         // Blit the framebuffer to the window
