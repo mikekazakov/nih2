@@ -80,7 +80,7 @@ impl Flares {
             1.0
         };
 
-        let sun_elevation_intensity: f32 = (sun_dir.y * 5.0).min(1.0);
+        let sun_elevation_intensity: f32 = (sun_dir.y * 4.0).min(1.0);
         if sun_elevation_intensity < 0.01 {
             return;
         }

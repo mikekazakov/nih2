@@ -98,36 +98,24 @@ fn project_dir_to_face_xy(face: Face, dir: Vec3, width: f32, height: f32) -> Opt
 }
 
 fn compute_sun_edge_16(sun_dir: Vec3, sun_radius: f32, offset_angle_rad: f32) -> [Vec3; 16] {
-    // --- Step 1: stable orthonormal basis around sun_dir ---
-    let up = if sun_dir.y.abs() < 0.99 {
+    let up: Vec3 = if sun_dir.y.abs() < 0.99 {
         Vec3::new(0.0, 1.0, 0.0)
     } else {
         Vec3::new(1.0, 0.0, 0.0)
     };
+    let ex: Vec3 = cross(sun_dir, up).normalized();
+    let ey: Vec3 = cross(sun_dir, ex).normalized();
+    let cos_r: f32 = sun_radius.cos();
+    let sin_r: f32 = sun_radius.sin();
 
-    let ex = cross(sun_dir, up).normalized();
-    let ey = cross(sun_dir, ex).normalized();
-
-    // --- Step 2: precompute cos/sin(radius) ---
-    let cos_r = sun_radius.cos();
-    let sin_r = sun_radius.sin();
-
-    // --- Step 3: produce 16 angles around the circle ---
     let mut result = [Vec3::new(0.0, 0.0, 0.0); 16];
-
     for i in 0..16 {
-        // angle = offset + i * 360°/16 = offset + i * 22.5°
-        let phi = offset_angle_rad + (i as f32) * (std::f32::consts::TAU / 16.0);
-        let phi_cos = phi.cos();
-        let phi_sin = phi.sin();
-
-        // spherical rim position
-        // R = cos(r)*D + sin(r)*(cos(phi)*ex + sin(phi)*ey)
-        let dir = sun_dir * cos_r + ex * (phi_cos * sin_r) + ey * (phi_sin * sin_r);
-
+        let phi: f32 = offset_angle_rad + (i as f32) * (std::f32::consts::TAU / 16.0);
+        let phi_cos: f32 = phi.cos();
+        let phi_sin: f32 = phi.sin();
+        let dir: Vec3 = sun_dir * cos_r + ex * (phi_cos * sin_r) + ey * (phi_sin * sin_r);
         result[i] = dir.normalized();
     }
-
     result
 }
 
@@ -366,12 +354,12 @@ fn init_flares() -> Flares {
 
     let mut flare1: Flare = Flare::default();
     flare1.texture = flare_tex2.clone();
-    flare1.scale1 = 0.2;
+    flare1.scale1 = 0.15;
     flare1.scale0 = 0.1;
     flare1.angle1 = 0.7;
     flare1.angle0 = 0.1;
     flare1.alpha1 = -0.4;
-    flare1.alpha0 = 0.6;
+    flare1.alpha0 = 0.5;
     flares.add_flare(flare1);
 
     let mut flare2: Flare = Flare::default();
@@ -383,7 +371,7 @@ fn init_flares() -> Flares {
     flare2.angle1 = -0.3;
     flare2.angle0 = 0.2;
     flare2.alpha1 = -0.3;
-    flare2.alpha0 = 1.0;
+    flare2.alpha0 = 0.8;
     flares.add_flare(flare2);
 
     let mut flare3: Flare = Flare::default();
@@ -392,6 +380,7 @@ fn init_flares() -> Flares {
     flare3.scale1 = -0.1;
     flare3.scale0 = 0.1;
     flare3.angle0 = 0.3;
+    flare3.alpha0 = 0.7;
     flares.add_flare(flare3);
 
     let mut flare4: Flare = Flare::default();
@@ -403,7 +392,7 @@ fn init_flares() -> Flares {
     flare4.angle1 = 0.2;
     flare4.angle0 = 0.5;
     flare4.alpha1 = -0.1;
-    flare4.alpha0 = 0.8;
+    flare4.alpha0 = 0.7;
     flares.add_flare(flare4);
 
     let mut flare5: Flare = Flare::default();
@@ -415,7 +404,7 @@ fn init_flares() -> Flares {
     flare5.angle1 = -0.1;
     flare5.angle0 = 0.3;
     flare5.alpha1 = -0.1;
-    flare5.alpha0 = 0.6;
+    flare5.alpha0 = 0.5;
     flares.add_flare(flare5);
 
     flares
@@ -469,82 +458,22 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut pos_y_tex = dummy_gray_texture.clone();
     let mut pos_z_tex = dummy_gray_texture.clone();
 
-    let neg_z_positions = [
-        Vec3::new(-1.0, 1.0, -1.0),
-        Vec3::new(-1.0, -1.0, -1.0),
-        Vec3::new(1.0, 1.0, -1.0),
-        Vec3::new(1.0, 1.0, -1.0),
-        Vec3::new(-1.0, -1.0, -1.0),
-        Vec3::new(1.0, -1.0, -1.0),
-    ];
-    let pos_z_positions = [
-        Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(1.0, -1.0, 1.0),
-        Vec3::new(-1.0, 1.0, 1.0),
-        Vec3::new(-1.0, 1.0, 1.0),
-        Vec3::new(1.0, -1.0, 1.0),
-        Vec3::new(-1.0, -1.0, 1.0),
-    ];
-    let pos_x_positions = [
-        Vec3::new(1.0, 1.0, -1.0),
-        Vec3::new(1.0, -1.0, -1.0),
-        Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(1.0, -1.0, -1.0),
-        Vec3::new(1.0, -1.0, 1.0),
-    ];
-    let neg_x_positions = [
-        Vec3::new(-1.0, 1.0, 1.0),
-        Vec3::new(-1.0, -1.0, 1.0),
-        Vec3::new(-1.0, 1.0, -1.0),
-        Vec3::new(-1.0, 1.0, -1.0),
-        Vec3::new(-1.0, -1.0, 1.0),
-        Vec3::new(-1.0, -1.0, -1.0),
-    ];
-    let neg_y_positions = [
-        Vec3::new(-1.0, -1.0, -1.0),
-        Vec3::new(-1.0, -1.0, 1.0),
-        Vec3::new(1.0, -1.0, -1.0),
-        Vec3::new(1.0, -1.0, -1.0),
-        Vec3::new(-1.0, -1.0, 1.0),
-        Vec3::new(1.0, -1.0, 1.0),
-    ];
-    let pos_y_positions = [
-        Vec3::new(-1.0, 1.0, 1.0),
-        Vec3::new(-1.0, 1.0, -1.0),
-        Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(-1.0, 1.0, -1.0),
-        Vec3::new(1.0, 1.0, -1.0),
-    ];
-    let cubemap_face_tex_coords = [
-        Vec2::new(0.001, 0.001),
-        Vec2::new(0.001, 0.999),
-        Vec2::new(0.999, 0.001),
-        Vec2::new(0.999, 0.001),
-        Vec2::new(0.001, 0.999),
-        Vec2::new(0.999, 0.999),
-    ];
-
     // Allocate the buffers and the rasterizer
+    let flares: Flares = init_flares();
     let mut viewport: Viewport = Viewport::default();
     let mut color_buffer = TiledBuffer::<u32, 64, 64>::new(1, 1);
-    let mut rasterizer = Rasterizer::new();
-    let mut last = std::time::Instant::now();
-    let mut t = 0.0;
-    let mut dt: f32 = 0.0;
+    let mut rasterizer: Rasterizer = Rasterizer::new();
+    let mut last: std::time::Instant = std::time::Instant::now();
+    let mut t: f32 = 0.0;
     let mut sun_dir: Vec3 = Vec3::new(0.0, 0.0, -1.0).normalized();
     let mut sky_turbidity: f32 = 3.0;
     let mut ground_albedo: Vec3 = Vec3::new(0.0, 0.0, 0.5);
     let mut rebuild_skybox: bool = true;
     let mut camera_orientation: Quat = Quat::from_axis_angle(Vec3::new(0.0, 0.0, -1.0), 0.0);
-    let camera_position: Vec3 = Vec3::new(0.0, 2.0, 35.0);
+    let camera_position: Vec3 = Vec3::new(0.0, 0.0, 0.0);
     let mut show_wireframe: bool = false;
-    let mut paused = false;
+    let mut paused: bool = false;
     let mut event_pump = sdl_context.event_pump().map_err(|e| e.to_string())?;
-    let mut faces_build_time: f32 = 0.0;
-    let mut faces_build_time_n: u32 = 0;
-    let flares: Flares = init_flares();
 
     loop {
         // Poll for SDL events
@@ -611,9 +540,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             t += (std::time::Instant::now() - last).as_secs_f32();
             rebuild_skybox = true;
         }
-        dt = (std::time::Instant::now() - last).as_secs_f32();
         last = std::time::Instant::now();
-        println!("FPS: {:.0}", 1.0 / dt);
 
         if rebuild_skybox {
             sun_dir = Vec3::new((t * 0.1).sin() * 0.5, (t * 0.1).sin(), -(t * 0.1).cos()).normalized();
@@ -621,7 +548,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             let sun_elevation: f32 = (3.14 / 2.0 - theta_sun).max(0.0); // angle from the horizon, radians
             let sky: HosekWilkieSky = HosekWilkieSky::new(sky_turbidity, ground_albedo, sun_elevation);
             let faces = [Face::YPos, Face::XNeg, Face::XPos, Face::ZPos, Face::ZNeg];
-            let start = std::time::Instant::now();
             use rayon::prelude::*;
             let results: Vec<Arc<Texture>> = faces.par_iter().map(|face| build_face(&sky, *face, sun_dir)).collect();
             pos_y_tex = results[0].clone();
@@ -629,14 +555,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             pos_x_tex = results[2].clone();
             pos_z_tex = results[3].clone();
             neg_z_tex = results[4].clone();
-            let duration = std::time::Instant::now() - start;
-            faces_build_time += duration.as_secs_f32();
-            faces_build_time_n += 1;
-            if faces_build_time_n == 1000 {
-                println!("build_face: {:.1}ms", faces_build_time);
-                faces_build_time = 0.0;
-                faces_build_time_n = 0;
-            }
             rebuild_skybox = false;
         }
 
@@ -657,11 +575,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let view: Mat44 = camera_to_mat34(camera_orientation, camera_position).as_mat44();
         let view_orientation: Mat44 = view.as_mat33().as_mat44();
 
-        // draw the skybox and the flares
+        // Draw the skybox and the flares
         let mut commit_face = |pos: &[Vec3; 6], texture: &Arc<Texture>| {
             rasterizer.commit(&RasterizationCommand {
                 world_positions: pos,
-                tex_coords: &cubemap_face_tex_coords,
+                tex_coords: &FACE_TEX_COORDS,
                 texture: Some(texture.clone()),
                 sampling_filter: SamplerFilter::Bilinear,
                 projection,
@@ -670,12 +588,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..Default::default()
             });
         };
-        commit_face(&neg_x_positions, &neg_x_tex);
-        commit_face(&pos_x_positions, &pos_x_tex);
-        commit_face(&neg_y_positions, &neg_y_tex);
-        commit_face(&pos_y_positions, &pos_y_tex);
-        commit_face(&neg_z_positions, &neg_z_tex);
-        commit_face(&pos_z_positions, &pos_z_tex);
+        commit_face(&FACE_NEG_X_POSITIONS, &neg_x_tex);
+        commit_face(&FACE_POS_X_POSITIONS, &pos_x_tex);
+        commit_face(&FACE_NEG_Y_POSITIONS, &neg_y_tex);
+        commit_face(&FACE_POS_Y_POSITIONS, &pos_y_tex);
+        commit_face(&FACE_NEG_Z_POSITIONS, &neg_z_tex);
+        commit_face(&FACE_POS_Z_POSITIONS, &pos_z_tex);
         flares.commit(viewport, &view_orientation, &projection, sun_dir, &mut rasterizer);
         rasterizer.draw(&mut Framebuffer { color_buffer: Some(&mut color_buffer), ..Default::default() });
 
@@ -688,3 +606,66 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         windows_surface.finish()?;
     }
 }
+
+static FACE_NEG_Z_POSITIONS: [Vec3; 6] = [
+    Vec3::new(-1.0, 1.0, -1.0),
+    Vec3::new(-1.0, -1.0, -1.0),
+    Vec3::new(1.0, 1.0, -1.0),
+    Vec3::new(1.0, 1.0, -1.0),
+    Vec3::new(-1.0, -1.0, -1.0),
+    Vec3::new(1.0, -1.0, -1.0),
+];
+
+static FACE_POS_Z_POSITIONS: [Vec3; 6] = [
+    Vec3::new(1.0, 1.0, 1.0),
+    Vec3::new(1.0, -1.0, 1.0),
+    Vec3::new(-1.0, 1.0, 1.0),
+    Vec3::new(-1.0, 1.0, 1.0),
+    Vec3::new(1.0, -1.0, 1.0),
+    Vec3::new(-1.0, -1.0, 1.0),
+];
+
+static FACE_POS_X_POSITIONS: [Vec3; 6] = [
+    Vec3::new(1.0, 1.0, -1.0),
+    Vec3::new(1.0, -1.0, -1.0),
+    Vec3::new(1.0, 1.0, 1.0),
+    Vec3::new(1.0, 1.0, 1.0),
+    Vec3::new(1.0, -1.0, -1.0),
+    Vec3::new(1.0, -1.0, 1.0),
+];
+
+static FACE_NEG_X_POSITIONS: [Vec3; 6] = [
+    Vec3::new(-1.0, 1.0, 1.0),
+    Vec3::new(-1.0, -1.0, 1.0),
+    Vec3::new(-1.0, 1.0, -1.0),
+    Vec3::new(-1.0, 1.0, -1.0),
+    Vec3::new(-1.0, -1.0, 1.0),
+    Vec3::new(-1.0, -1.0, -1.0),
+];
+
+static FACE_NEG_Y_POSITIONS: [Vec3; 6] = [
+    Vec3::new(-1.0, -1.0, -1.0),
+    Vec3::new(-1.0, -1.0, 1.0),
+    Vec3::new(1.0, -1.0, -1.0),
+    Vec3::new(1.0, -1.0, -1.0),
+    Vec3::new(-1.0, -1.0, 1.0),
+    Vec3::new(1.0, -1.0, 1.0),
+];
+
+static FACE_POS_Y_POSITIONS: [Vec3; 6] = [
+    Vec3::new(-1.0, 1.0, 1.0),
+    Vec3::new(-1.0, 1.0, -1.0),
+    Vec3::new(1.0, 1.0, 1.0),
+    Vec3::new(1.0, 1.0, 1.0),
+    Vec3::new(-1.0, 1.0, -1.0),
+    Vec3::new(1.0, 1.0, -1.0),
+];
+
+static FACE_TEX_COORDS: [Vec2; 6] = [
+    Vec2::new(0.001, 0.001),
+    Vec2::new(0.001, 0.999),
+    Vec2::new(0.999, 0.001),
+    Vec2::new(0.999, 0.001),
+    Vec2::new(0.001, 0.999),
+    Vec2::new(0.999, 0.999),
+];
