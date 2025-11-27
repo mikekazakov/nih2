@@ -25,3 +25,5 @@ It's not production-quality and has no practical purpose - it's just the result 
   Normal mapping and a basic deferred lighting in ~170 LoCs.
 - [./examples/grass](https://github.com/mikekazakov/nih2/tree/main/examples/grass)  
   Grass simulation and rendering in ~250 LoCs.
+- [./examples/skybox](https://github.com/mikekazakov/nih2/tree/main/examples/skybox)  
+  Hosek-Wilkie skybox generation and rendering in ~1.2 KLoCs.
